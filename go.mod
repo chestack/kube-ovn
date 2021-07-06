@@ -11,6 +11,7 @@ require (
 	github.com/coreos/go-iptables v0.6.0
 	github.com/emicklei/go-restful/v3 v3.7.3
 	github.com/golang/protobuf v1.5.2
+	github.com/gophercloud/gophercloud v0.1.0
 	github.com/greenpau/ovsdb v0.0.0-20181114004433-3582b85e8968
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.1.1-0.20210510153419-66a699ae3b05
 	github.com/mdlayher/arp v0.0.0-20191213142603-f72070a231fc
@@ -31,6 +32,7 @@ require (
 	k8s.io/api v0.23.1
 	k8s.io/apimachinery v0.23.1
 	k8s.io/client-go v0.23.1
+	k8s.io/klog v1.0.0
 	k8s.io/klog/v2 v2.30.0
 	k8s.io/sample-controller v0.23.1
 	sigs.k8s.io/controller-runtime v0.11.0

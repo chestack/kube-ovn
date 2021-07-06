@@ -7,15 +7,15 @@ function gen_conn_str {
   if [[ -z "${OVN_DB_IPS}" ]]; then
     if [[ "$1" == "6641" ]]; then
       if [[ "$ENABLE_SSL" == "false" ]]; then
-        x="tcp:[${OVN_NB_SERVICE_HOST}]:${OVN_NB_SERVICE_PORT}"
+        x="tcp:[${OVN_OVSDB_NB_SERVICE_HOST}]:${OVN_OVSDB_NB_SERVICE_PORT}"
       else
-        x="ssl:[${OVN_NB_SERVICE_HOST}]:${OVN_NB_SERVICE_PORT}"
+        x="ssl:[${OVN_OVSDB_NB_SERVICE_HOST}]:${OVN_OVSDB_NB_SERVICE_PORT}"
       fi
     else
       if [[ "$ENABLE_SSL" == "false" ]]; then
-        x="tcp:[${OVN_SB_SERVICE_HOST}]:${OVN_SB_SERVICE_PORT}"
+        x="tcp:[${OVN_OVSDB_SB_SERVICE_HOST}]:${OVN_OVSDB_SB_SERVICE_PORT}"
       else
-        x="ssl:[${OVN_SB_SERVICE_HOST}]:${OVN_SB_SERVICE_PORT}"
+        x="ssl:[${OVN_OVSDB_SB_SERVICE_HOST}]:${OVN_OVSDB_SB_SERVICE_PORT}"
       fi
     fi
   else
@@ -29,11 +29,15 @@ function gen_conn_str {
   echo "$x"
 }
 
-if [[ "$ENABLE_SSL" == "false" ]]; then
-  export OVN_NB_DAEMON=$(ovn-nbctl --db="$(gen_conn_str 6641)" --pidfile --detach --overwrite-pidfile)
+if [[ -z "${NO_OVN}" ]]; then
+  if [[ "$ENABLE_SSL" == "false" ]]; then
+    export OVN_NB_DAEMON=$(ovn-nbctl --db="$(gen_conn_str 6641)" --pidfile --detach --overwrite-pidfile)
+  else
+    export OVN_NB_DAEMON=$(ovn-nbctl -p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert --db="$(gen_conn_str 6641)" --pidfile --detach --overwrite-pidfile)
+  fi
+  exec ./kube-ovn-controller --ovn-nb-addr="$(gen_conn_str 6641)" \
+                             --ovn-sb-addr="$(gen_conn_str 6642)" \
+                             $@
 else
-  export OVN_NB_DAEMON=$(ovn-nbctl -p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert --db="$(gen_conn_str 6641)" --pidfile --detach --overwrite-pidfile)
+  exec ./kube-ovn-controller $@
 fi
-exec ./kube-ovn-controller --ovn-nb-addr="$(gen_conn_str 6641)" \
-                           --ovn-sb-addr="$(gen_conn_str 6642)" \
-                           $@

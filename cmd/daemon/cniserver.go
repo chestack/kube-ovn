@@ -38,16 +38,19 @@ func CmdMain() {
 		klog.Fatalf("parse config failed %v", err)
 	}
 
-	if err := Retry(util.ChasRetryTime, util.ChasRetryIntev, initChassisAnno, config); err != nil {
-		klog.Fatalf("failed to annotate chassis id, %v", err)
-	}
+	if !config.NoOVN {
 
-	if err = daemon.InitMirror(config); err != nil {
-		klog.Fatalf("failed to init mirror nic, %v", err)
-	}
+		if err := Retry(util.ChasRetryTime, util.ChasRetryIntev, initChassisAnno, config); err != nil {
+			klog.Fatalf("failed to annotate chassis id, %v", err)
+		}
 
-	if err = daemon.InitNodeGateway(config); err != nil {
-		klog.Fatalf("init node gateway failed %v", err)
+		if err = daemon.InitMirror(config); err != nil {
+			klog.Fatalf("failed to init mirror nic, %v", err)
+		}
+
+		if err = daemon.InitNodeGateway(config); err != nil {
+			klog.Fatalf("init node gateway failed %v", err)
+		}
 	}
 
 	stopCh := signals.SetupSignalHandler()
@@ -71,7 +74,11 @@ func CmdMain() {
 	podInformerFactory.Start(stopCh)
 	nodeInformerFactory.Start(stopCh)
 	kubeovnInformerFactory.Start(stopCh)
-	go ctl.Run(stopCh)
+	if config.NoOVN {
+		go ctl.RunWithoutOVN(stopCh)
+	} else {
+		go ctl.Run(stopCh)
+	}
 	go daemon.RunServer(config, ctl)
 	if err := mvCNIConf(); err != nil {
 		klog.Fatalf("failed to mv cni conf, %v", err)
@@ -85,7 +92,7 @@ func mvCNIConf() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile("/etc/cni/net.d/01-kube-ovn.conflist", data, 0444)
+	return os.WriteFile("/etc/cni/net.d/20-kube-ovn.conflist", data, 0444)
 }
 
 func Retry(attempts int, sleep int, f func(configuration *daemon.Configuration) error, ctrl *daemon.Configuration) (err error) {

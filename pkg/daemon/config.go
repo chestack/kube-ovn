@@ -44,6 +44,9 @@ type Configuration struct {
 	NetworkType           string
 	DefaultProviderName   string
 	DefaultInterfaceName  string
+
+	// 表示集群节点中未安装 ovn，只能调用 Neutron 相关接口。初始化时从环境变量中配置
+	NoOVN bool
 }
 
 // ParseFlags will parse cmd args then init kubeClient and configuration
@@ -117,6 +120,10 @@ func ParseFlags() (*Configuration, error) {
 
 	if err := config.initNicConfig(); err != nil {
 		return nil, err
+	}
+
+	if os.Getenv("NO_OVN") == "true" {
+		config.NoOVN = true
 	}
 
 	klog.Infof("daemon config: %v", config)

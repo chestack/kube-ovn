@@ -44,7 +44,7 @@ ovs-ctl --protocol=udp --dport=6081 enable-protocol
 ovn-ctl restart_controller
 
 # Set remote ovn-sb for ovn-controller to connect to
-ovs-vsctl set open . external-ids:ovn-remote=tcp:"${OVN_SB_SERVICE_HOST}":"${OVN_SB_SERVICE_PORT}"
+ovs-vsctl set open . external-ids:ovn-remote=tcp:"${OVN_OVSDB_SB_SERVICE_HOST}":"${OVN_OVSDB_SB_SERVICE_PORT}"
 ovs-vsctl set open . external-ids:ovn-remote-probe-interval=10000
 ovs-vsctl set open . external-ids:ovn-openflow-probe-interval=180
 ovs-vsctl set open . external-ids:ovn-encap-type=geneve

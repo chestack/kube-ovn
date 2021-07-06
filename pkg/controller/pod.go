@@ -24,6 +24,7 @@ import (
 
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	"github.com/kubeovn/kube-ovn/pkg/ipam"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/util"
 )
@@ -64,7 +65,7 @@ func (c *Controller) enqueueAddPod(obj interface{}) {
 
 	p := obj.(*v1.Pod)
 	// TODO: we need to find a way to reduce duplicated np added to the queue
-	if c.config.EnableNP && p.Status.PodIP != "" {
+	if c.config.EnableNP && p.Status.PodIP != "" && !c.config.NoOVN {
 		for _, np := range c.podMatchNetworkPolicies(p) {
 			c.updateNpQueue.Add(np)
 		}
@@ -114,6 +115,10 @@ func (c *Controller) enqueueAddPod(obj interface{}) {
 		return
 	}
 
+	if !neutron.HandledByNeutron(p.Annotations) {
+		return
+	}
+
 	klog.V(3).Infof("enqueue add pod %s", key)
 	c.addPodQueue.Add(key)
 }
@@ -130,7 +135,21 @@ func (c *Controller) enqueueDeletePod(obj interface{}) {
 	}
 
 	p := obj.(*v1.Pod)
-	if c.config.EnableNP {
+	if c.config.EnableNP && !c.config.NoOVN {
+		for _, np := range c.podMatchNetworkPolicies(p) {
+			c.updateNpQueue.Add(np)
+		}
+	}
+
+	if !neutron.HandledByNeutron(p.Annotations) {
+		return
+	}
+	// if the deleted pod is on Neutron network, store the Port ID for later use
+	if neutron.HandledByNeutron(p.Annotations) {
+		c.neutronController.ntrnCli.RememberPortID(key, p.Annotations[neutron.PORT_ID])
+	}
+
+	if !c.config.NoOVN {
 		for _, np := range c.podMatchNetworkPolicies(p) {
 			c.updateNpQueue.Add(np)
 		}
@@ -167,7 +186,7 @@ func (c *Controller) enqueueUpdatePod(oldObj, newObj interface{}) {
 		return
 	}
 
-	if c.config.EnableNP {
+	if c.config.EnableNP && !c.config.NoOVN {
 		if !reflect.DeepEqual(oldPod.Labels, newPod.Labels) {
 			oldNp := c.podMatchNetworkPolicies(oldPod)
 			newNp := c.podMatchNetworkPolicies(newPod)
@@ -181,6 +200,14 @@ func (c *Controller) enqueueUpdatePod(oldObj, newObj interface{}) {
 				c.updateNpQueue.Add(np)
 			}
 		}
+	}
+
+	//if newPod.Annotations != nil && neutron.HandledByNeutron(newPod.Annotations) {
+	//	return
+	//}
+	// 暂不支持对 Pod 升级的处理
+	if true {
+		return
 	}
 
 	if newPod.Spec.HostNetwork {
@@ -449,6 +476,59 @@ func (c *Controller) handleAddPod(key string) error {
 		return err
 	}
 	pod := oripod.DeepCopy()
+
+	// when Pod is attatched to Neutron network
+	if neutron.HandledByNeutron(pod.Annotations) {
+		if err := neutron.ValidateNeutronConfig(pod.Annotations); err != nil {
+			return err
+		}
+
+		networkID := pod.Annotations[neutron.NETWORK_ID]
+		subnetID := pod.Annotations[neutron.SUBNET_ID]
+		fixIP := pod.Annotations[neutron.FIX_IP]
+		projectID := pod.Annotations[neutron.KURYR_PROJECT_ID]
+		sgs := pod.Annotations[neutron.KURYR_SECURITY_GROUPS]
+
+		port, err := c.neutronController.ntrnCli.CreatePort(key, projectID, networkID, subnetID, fixIP, sgs)
+		if err != nil {
+			return fmt.Errorf("create Neutron Port failure, name: %s, network: %s, subnet: %s, %w",
+				name, networkID, subnetID, err)
+		}
+		klog.Infof("Neutron Port created for Pod %s, ID: %s", key, port.ID)
+		pod.Annotations[neutron.PORT_ID] = port.ID
+		provider := "ovn"
+		pod.Annotations[fmt.Sprintf(util.MacAddressAnnotationTemplate, provider)] = port.MAC
+		pod.Annotations[fmt.Sprintf(util.IpAddressAnnotationTemplate, provider)] = port.IP
+		pod.Annotations[fmt.Sprintf(util.CidrAnnotationTemplate, provider)] = port.CIDR
+		pod.Annotations[fmt.Sprintf(util.GatewayAnnotationTemplate, provider)] = port.Gateway
+		pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, provider)] = port.SubnetID
+		pod.Annotations[fmt.Sprintf(util.ProviderNetworkMtuTemplate, provider)] = strconv.Itoa(port.MTU)
+		pod.Annotations[fmt.Sprintf(util.AllocatedAnnotationTemplate, provider)] = "true"
+
+		//  TODO: 要把这些注解补齐， CNI 在配置 Pod 网络时会用到
+		//	ingress = pod.Annotations[fmt.Sprintf(util.IngressRateAnnotationTemplate, podRequest.Provider)]
+		//	egress = pod.Annotations[fmt.Sprintf(util.EgressRateAnnotationTemplate, podRequest.Provider)]
+		//	providerNetwork = pod.Annotations[fmt.Sprintf(util.ProviderNetworkTemplate, podRequest.Provider)]
+		//	vlanID = pod.Annotations[fmt.Sprintf(util.VlanIdAnnotationTemplate, podRequest.Provider)]
+
+		if _, err := c.config.KubeClient.CoreV1().Pods(namespace).Patch(context.Background(),
+			name, types.JSONPatchType, generatePatchPayload(pod.Annotations, "replace"), metav1.PatchOptions{}, ""); err != nil {
+			if k8serrors.IsNotFound(err) {
+				// Sometimes pod is deleted between kube-ovn configure ovn-nb and patch pod.
+				// Then we need to recycle the resource again.
+				c.deletePodQueue.AddRateLimited(key)
+				return nil
+			}
+			klog.Errorf("patch pod %s/%s failed %v", name, namespace, err)
+			return err
+		}
+		return nil
+	}
+
+	if c.config.NoOVN {
+		return nil
+	}
+
 	if err := util.ValidatePodNetwork(pod.Annotations); err != nil {
 		klog.Errorf("validate pod %s/%s failed: %v", namespace, name, err)
 		c.recorder.Eventf(pod, v1.EventTypeWarning, "ValidatePodNetworkFailed", err.Error())
@@ -573,6 +653,22 @@ func (c *Controller) handleDeletePod(pod *v1.Pod) error {
 	p, _ := c.podsLister.Pods(pod.Namespace).Get(pod.Name)
 	if p != nil && p.UID != pod.UID {
 		// Pod with same name exists, just return here
+		return nil
+	}
+
+	// If the deleted pod has a Neutron port ID stored,
+	// delete that port and exit the function to avoid
+	// ovn releated operations
+	if port, ok := c.neutronController.ntrnCli.PodToPortID(key); ok {
+		klog.Infof("Deleting Neutron port, name: %s, id: %s", key, port)
+		err := c.neutronController.ntrnCli.DeletePort(port)
+		if err == nil {
+			c.neutronController.ntrnCli.ForgetPortID(key)
+		}
+		return err
+	}
+
+	if c.config.NoOVN {
 		return nil
 	}
 
@@ -709,6 +805,15 @@ func (c *Controller) handleUpdatePod(key string) error {
 		return err
 	}
 	pod := oripod.DeepCopy()
+
+	// skip update operation if the pod in on Neutron network
+	if neutron.HandledByNeutron(pod.Annotations) {
+		return nil
+	}
+
+	if c.config.NoOVN {
+		return nil
+	}
 
 	// in case update handler overlap the annotation when cache is not in sync
 	if pod.Annotations[util.AllocatedAnnotation] == "" {

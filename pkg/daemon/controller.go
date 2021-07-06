@@ -37,6 +37,7 @@ import (
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	kubeovninformer "github.com/kubeovn/kube-ovn/pkg/client/informers/externalversions"
 	kubeovnlister "github.com/kubeovn/kube-ovn/pkg/client/listers/kubeovn/v1"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/util"
 )
@@ -70,7 +71,10 @@ type Controller struct {
 	ipsets    map[string]*ipsets.IPSets
 	ipsetLock sync.Mutex
 
-	protocol string
+	protocol   string
+	internalIP string
+
+	neutronClient *neutron.Client
 }
 
 // NewController init a daemon controller
@@ -109,6 +113,8 @@ func NewController(config *Configuration, podInformerFactory informers.SharedInf
 		htbQosSynced: htbQosInformer.Informer().HasSynced,
 
 		recorder: recorder,
+
+		neutronClient: neutron.NewClient(),
 	}
 
 	node, err := config.KubeClient.CoreV1().Nodes().Get(context.Background(), config.NodeName, metav1.GetOptions{})
@@ -137,6 +143,14 @@ func NewController(config *Configuration, podInformerFactory informers.SharedInf
 		controller.ipsets[kubeovnv1.ProtocolIPv6] = ipsets.NewIPSets(ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, IPSetPrefix, nil, nil))
 	}
 
+	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: controller.enqueuePod,
+	})
+
+	if config.NoOVN {
+		return controller, nil
+	}
+
 	providerNetworkInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    controller.enqueueAddProviderNetwork,
 		UpdateFunc: controller.enqueueUpdateProviderNetwork,
@@ -146,9 +160,6 @@ func NewController(config *Configuration, podInformerFactory informers.SharedInf
 		AddFunc:    controller.enqueueAddSubnet,
 		UpdateFunc: controller.enqueueUpdateSubnet,
 		DeleteFunc: controller.enqueueDeleteSubnet,
-	})
-	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: controller.enqueuePod,
 	})
 
 	return controller, nil

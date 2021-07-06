@@ -14,5 +14,7 @@ vpc-nat-gateway.tar
 image-amd64.tar
 image-arm64.tar
 install-underlay.sh
+install-vlan.sh
 test/**/*.test
 install-multi.sh
+vendor/

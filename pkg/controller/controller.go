@@ -48,6 +48,8 @@ type Controller struct {
 	updatePodSecurityQueue workqueue.RateLimitingInterface
 	podKeyMutex            *keymutex.KeyMutex
 
+	neutronController *NeutronController
+
 	vpcsLister           kubeovnlister.VpcLister
 	vpcSynced            cache.InformerSynced
 	addOrUpdateVpcQueue  workqueue.RateLimitingInterface
@@ -171,6 +173,8 @@ func NewController(config *Configuration) *Controller {
 		ovnClient:    ovs.NewClient(config.OvnNbAddr, config.OvnTimeout, config.OvnSbAddr, config.ClusterRouter, config.ClusterTcpLoadBalancer, config.ClusterUdpLoadBalancer, config.ClusterTcpSessionLoadBalancer, config.ClusterUdpSessionLoadBalancer, config.NodeSwitch, config.NodeSwitchCIDR),
 		ipam:         ovnipam.NewIPAM(),
 
+		neutronController: MustNewNeutronController(config),
+
 		vpcsLister:           vpcInformer.Lister(),
 		vpcSynced:            vpcInformer.Informer().HasSynced,
 		addOrUpdateVpcQueue:  workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "AddOrUpdateVpc"),
@@ -253,11 +257,18 @@ func NewController(config *Configuration) *Controller {
 		kubeovnInformerFactory: kubeovnInformerFactory,
 	}
 
+	controller.neutronController.isLeader = controller.isLeader
+
 	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    controller.enqueueAddPod,
 		DeleteFunc: controller.enqueueDeletePod,
 		UpdateFunc: controller.enqueueUpdatePod,
 	})
+
+	// 在没有安装 ovn 的纯 Neutron 环境下，就不初始化后面的 Event Handler 了
+	if config.NoOVN {
+		return controller
+	}
 
 	namespaceInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    controller.enqueueAddNamespace,
@@ -408,6 +419,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 
 	// start workers to do all the network operations
 	c.startWorkers(stopCh)
+	c.neutronController.run(stopCh)
 	<-stopCh
 	klog.Info("Shutting down workers")
 }
@@ -454,7 +466,7 @@ func (c *Controller) shutdown() {
 	c.updateVpcSnatQueue.ShutDown()
 	c.updateVpcSubnetQueue.ShutDown()
 
-	if c.config.EnableNP {
+	if c.config.EnableNP && !c.config.NoOVN {
 		c.updateNpQueue.ShutDown()
 		c.deleteNpQueue.ShutDown()
 	}

@@ -92,8 +92,8 @@ func checkOvsBindings() ([]string, error) {
 }
 
 func checkSBBindings(config *Configuration) ([]string, error) {
-	sbHost := os.Getenv("OVN_SB_SERVICE_HOST")
-	sbPort := os.Getenv("OVN_SB_SERVICE_PORT")
+	sbHost := os.Getenv("OVN_OVSDB_SB_SERVICE_HOST")
+	sbPort := os.Getenv("OVN_OVSDB_SB_SERVICE_PORT")
 	command := []string{
 		fmt.Sprintf("--db=tcp:[%s]:%s", sbHost, sbPort),
 		"--format=csv",

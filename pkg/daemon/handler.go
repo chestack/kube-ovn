@@ -18,6 +18,7 @@ import (
 
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	clientset "github.com/kubeovn/kube-ovn/pkg/client/clientset/versioned"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/request"
 	"github.com/kubeovn/kube-ovn/pkg/util"
@@ -78,6 +79,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 	var gatewayCheckMode int
 	var macAddr, ip, ipAddr, cidr, gw, subnet, ingress, egress, providerNetwork, ifName, nicType, podNicName, priority string
 	var isDefaultRoute bool
+	var portID string
 	var pod *v1.Pod
 	var err error
 	for i := 0; i < 15; i++ {
@@ -104,6 +106,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 			time.Sleep(1 * time.Second)
 			continue
 		}
+		// TODO： 就算是走 Neutron，Pod上的这些标签也应该齐全
 		macAddr = pod.Annotations[fmt.Sprintf(util.MacAddressAnnotationTemplate, podRequest.Provider)]
 		ip = pod.Annotations[fmt.Sprintf(util.IpAddressAnnotationTemplate, podRequest.Provider)]
 		cidr = pod.Annotations[fmt.Sprintf(util.CidrAnnotationTemplate, podRequest.Provider)]
@@ -115,6 +118,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 		providerNetwork = pod.Annotations[fmt.Sprintf(util.ProviderNetworkTemplate, podRequest.Provider)]
 		ipAddr = util.GetIpAddrWithMask(ip, cidr)
 		ifName = podRequest.IfName
+		portID = pod.Annotations[neutron.PORT_ID]
 		if podRequest.DeviceID != "" {
 			nicType = util.OffloadType
 		} else {
@@ -146,22 +150,28 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 		return
 	}
 
-	if err := csh.createOrUpdateIPCr(podRequest, subnet, ip, macAddr); err != nil {
-		if err := resp.WriteHeaderAndEntity(http.StatusInternalServerError, request.CniResponse{Err: err.Error()}); err != nil {
-			klog.Errorf("failed to write response, %v", err)
+	if !neutron.HandledByNeutron(pod.Annotations) {
+		if err := csh.createOrUpdateIPCr(podRequest, subnet, ip, macAddr); err != nil {
+			if err := resp.WriteHeaderAndEntity(http.StatusInternalServerError, request.CniResponse{Err: err.Error()}); err != nil {
+				klog.Errorf("failed to write response, %v", err)
+			}
+			return
 		}
-		return
 	}
 
 	if strings.HasSuffix(podRequest.Provider, util.OvnProvider) && subnet != "" {
 		podSubnet, err := csh.Controller.subnetsLister.Get(subnet)
-		if err != nil {
+		if err != nil && !neutron.HandledByNeutron(pod.Annotations) {
 			errMsg := fmt.Errorf("failed to get subnet %s: %v", subnet, err)
 			klog.Error(errMsg)
 			if err = resp.WriteHeaderAndEntity(http.StatusInternalServerError, request.CniResponse{Err: errMsg.Error()}); err != nil {
 				klog.Errorf("failed to write response: %v", err)
 			}
 			return
+		}
+		if podSubnet == nil {
+			podSubnet = &kubeovnv1.Subnet{}
+			podSubnet.Spec.DisableGatewayCheck = true
 		}
 
 		if !podSubnet.Spec.DisableGatewayCheck {
@@ -220,7 +230,21 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 			return
 		}
 
-		if err = csh.Controller.addEgressConfig(podSubnet, ip); err != nil {
+		//更新 Neutron Port 的 hostID, devive owner 和 id(pod的uid作为 port 的 device id)
+		err = csh.Controller.neutronClient.BindPort(portID, pod.Spec.NodeName, string(pod.ObjectMeta.UID))
+		if err != nil {
+			klog.Errorf("binding port failed. pod %s/%s, port %s, hostId %s:", pod.Namespace, pod.Name,
+				portID, pod.Spec.NodeName)
+			klog.Errorf("error is %v", err)
+			return
+		}
+
+		if err = csh.Controller.neutronClient.WaitPortActive(portID, 60); err != nil {
+			klog.Errorf("waiting port %s become ACTIVE timeout", portID)
+			return
+		}
+
+		if err = csh.Controller.addEgressConfig(podSubnet, ip); err != nil && !neutron.HandledByNeutron(pod.Annotations) {
 			errMsg := fmt.Errorf("failed to add egress configuration: %v", err)
 			klog.Error(errMsg)
 			if err = resp.WriteHeaderAndEntity(http.StatusInternalServerError, request.CniResponse{Err: errMsg.Error()}); err != nil {
@@ -325,7 +349,7 @@ func (csh cniServerHandler) handleDel(req *restful.Request, resp *restful.Respon
 	klog.Infof("delete port request %v", podRequest)
 	if pod.Annotations != nil && (podRequest.Provider == util.OvnProvider || podRequest.CniType == util.CniTypeName) {
 		subnet := pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, podRequest.Provider)]
-		if subnet != "" {
+		if !neutron.HandledByNeutron(pod.Annotations) && subnet != "" {
 			ip := pod.Annotations[fmt.Sprintf(util.IpAddressAnnotationTemplate, podRequest.Provider)]
 			if err = csh.Controller.removeEgressConfig(subnet, ip); err != nil {
 				errMsg := fmt.Errorf("failed to remove egress configuration: %v", err)

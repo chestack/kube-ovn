@@ -1,0 +1,9 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: kube-ovn
+  namespace: secure-container
+spec:
+  config: '{ "name":"kube-ovn", "cniVersion":"0.3.1", "plugins":[ { "type":"kube-ovn",
+    "server_socket":"/run/openvswitch/kube-ovn-daemon.sock" }, { "type":"portmap",
+    "capabilities":{ "portMappings":true } } ] }'

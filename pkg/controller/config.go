@@ -69,6 +69,10 @@ type Configuration struct {
 	EnableLb          bool
 	EnableNP          bool
 	EnableExternalVpc bool
+
+	MulticastPrivileged bool
+	// 表示集群节点中未安装 ovn，只能调用 Neutron 相关接口。初始化时从环境变量中配置
+	NoOVN bool
 }
 
 // ParseFlags parses cmd args then init kubeclient and conf
@@ -196,6 +200,10 @@ func ParseFlags() (*Configuration, error) {
 
 	if err := config.initKubeFactoryClient(); err != nil {
 		return nil, err
+	}
+
+	if os.Getenv("NO_OVN") == "true" {
+		config.NoOVN = true
 	}
 
 	klog.Infof("config is  %+v", config)

@@ -38,14 +38,21 @@ func CmdMain() {
 		klog.Fatalf("failed to check permission %v", err)
 	}
 
-	go loopOvnNbctlDaemon(config)
+	if !config.NoOVN {
+		go loopOvnNbctlDaemon(config)
+	}
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
 		klog.Fatal(http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", config.PprofPort), nil))
 	}()
 
 	ctl := controller.NewController(config)
-	ctl.Run(stopCh)
+
+	if config.NoOVN {
+		ctl.RunWithoutOVN(stopCh)
+	} else {
+		ctl.Run(stopCh)
+	}
 }
 
 func loopOvnNbctlDaemon(config *controller.Configuration) {

@@ -14,9 +14,9 @@ fi
 function gen_conn_str {
   if [[ -z "${OVN_DB_IPS}" ]]; then
     if [[ "$ENABLE_SSL" == "false" ]]; then
-      x="tcp:[${OVN_SB_SERVICE_HOST}]:${OVN_SB_SERVICE_PORT}"
+      x="tcp:[${OVN_OVSDB_SB_SERVICE_HOST}]:${OVN_OVSDB_SB_SERVICE_PORT}"
     else
-      x="ssl:[${OVN_SB_SERVICE_HOST}]:${OVN_SB_SERVICE_PORT}"
+      x="ssl:[${OVN_OVSDB_SB_SERVICE_HOST}]:${OVN_OVSDB_SB_SERVICE_PORT}"
     fi
   else
     t=$(echo -n "${OVN_DB_IPS}" | sed 's/[[:space:]]//g' | sed 's/,/ /g')

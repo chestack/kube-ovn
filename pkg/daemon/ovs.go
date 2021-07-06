@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog/v2"
 
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/request"
 	"github.com/kubeovn/kube-ovn/pkg/util"
@@ -45,13 +46,24 @@ func (csh cniServerHandler) configureNic(podName, podNamespace, provider, netns,
 			return err
 		}
 	}
+	pod, err := csh.Controller.podsLister.Pods(podNamespace).Get(podName)
+	if err != nil {
+		errMsg := fmt.Errorf("get pod %s/%s failed %v", podNamespace, podName, err)
+		klog.Error(errMsg)
+		return err
+	}
 
 	ipStr := util.GetIpWithoutMask(ip)
 	ifaceID := ovs.PodNameToPortName(podName, podNamespace, provider)
+	if portID := pod.Annotations[neutron.PORT_ID]; portID != "" {
+		ifaceID = portID
+	}
 	ovs.CleanDuplicatePort(ifaceID)
 	// Add veth pair host end to ovs port
 	output, err := ovs.Exec(ovs.MayExist, "add-port", "br-int", hostNicName, "--",
-		"set", "interface", hostNicName, fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
+		"set", "interface", hostNicName,
+		fmt.Sprintf("external_ids:attached-mac=%s", mac), // 如果不加这个，Neutron Port 状态不会变成 ACTIVE
+		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:pod_name=%s", podName),
 		fmt.Sprintf("external_ids:pod_namespace=%s", podNamespace),
 		fmt.Sprintf("external_ids:ip=%s", ipStr),
@@ -68,8 +80,12 @@ func (csh cniServerHandler) configureNic(podName, podNamespace, provider, netns,
 	if err = configureHostNic(hostNicName); err != nil {
 		return err
 	}
-	if err = ovs.SetInterfaceBandwidth(podName, podNamespace, ifaceID, egress, ingress, priority); err != nil {
-		return err
+
+	// 如果是 Neutron，这里应该跳过。带宽由 Neutron 的QoS 负责
+	if !neutron.HandledByNeutron(pod.Annotations) {
+		if err = ovs.SetInterfaceBandwidth(podName, podNamespace, ifaceID, egress, ingress, priority); err != nil {
+			return err
+		}
 	}
 
 	if containerNicName == "" {

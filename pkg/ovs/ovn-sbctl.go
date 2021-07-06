@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"k8s.io/klog/v2"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 )
 
 func (c Client) ovnSbCommand(cmdArgs ...string) (string, error) {
@@ -66,7 +67,12 @@ func (c Client) DeleteChassis(node string) error {
 }
 
 func (c Client) GetChassis(node string) (string, error) {
-	output, err := c.ovnSbCommand("--format=csv", "--no-heading", "--data=bare", "--columns=name", "find", "chassis", fmt.Sprintf("hostname=%s", node))
+	// chassis' hostname always ends with .domain.tld in EOS
+	output, err := c.ovnSbCommand("--format=csv", "--no-heading", "--data=bare", "--columns=name", "find", "chassis", fmt.Sprintf("hostname=%s%s", node, neutron.ECS_HOSTNAME_SUFFIX))
+	if err == nil {
+		return strings.TrimSpace(output), nil
+	}
+	output, err = c.ovnSbCommand("--format=csv", "--no-heading", "--data=bare", "--columns=name", "find", "chassis", fmt.Sprintf("hostname=%s", node))
 	if err != nil {
 		return "", fmt.Errorf("failed to find node chassis %s, %v", node, err)
 	}
