@@ -18,12 +18,14 @@ type Port struct {
 }
 
 type PortSpec struct {
-	Name            string   `json:"name"`
-	NetworkID       string   `json:"networkId"`
-	SubnetID        string   `json:"subnetId"`
-	SecurityGroupID []string `json:"securityGroupId"`
-	IP              string   `json:"ip"`
-	MAC             string   `json:"mac"`
+	Name            string   `json:"name,omitempty"`
+	ProjectID       string   `json:"projectId,omitempty"`
+	NetworkID       string   `json:"networkId,omitempty"`
+	SubnetID        string   `json:"subnetId,omitempty"`
+	SecurityGroupID []string `json:"securityGroupId,omitempty"`
+	FixIP           string   `json:"fixIp,omitempty"`
+	FixMAC          string   `json:"fixMac,omitempty"`
+	DeleteByPod     bool     `json:"deleteByPod,omitempty"`
 }
 
 type PortStatus struct {
@@ -35,6 +37,12 @@ type PortStatus struct {
 
 	// Port 在 Neutron 中的 ID, 由 Neutron 分配
 	ID string `json:"id"`
+
+	IP string `json:"ip"`
+
+	MAC string `json:"mac"`
+
+	SecurityGroupID []string `json:"securityGroupId"`
 
 	// Port 所在的 Subnet 的网段
 	CIDR string `json:"cidr"`
@@ -54,6 +62,23 @@ type PortStatus struct {
 
 // ConditionType encodes information on the condition
 type ConditionType string
+
+// Constants for condition
+const (
+	// Ready => controller considers this resource Ready
+	Ready = "Ready"
+	// Validated => Spec passed validating
+	Validated = "Validated"
+	// Error => last recorded error
+	Error = "Error"
+
+	ReasonInit = "Init"
+)
+
+const (
+	ConditionCreated   ConditionType = "Created"
+	ConditionActivated ConditionType = "Activated"
+)
 
 type PortCondition struct {
 	// Type of condition.

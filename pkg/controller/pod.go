@@ -25,6 +25,7 @@ import (
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	"github.com/kubeovn/kube-ovn/pkg/ipam"
 	"github.com/kubeovn/kube-ovn/pkg/neutron"
+	neutronv1 "github.com/kubeovn/kube-ovn/pkg/neutron/apis/neutron/v1"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/util"
 )
@@ -146,7 +147,7 @@ func (c *Controller) enqueueDeletePod(obj interface{}) {
 	}
 	// if the deleted pod is on Neutron network, store the Port ID for later use
 	if neutron.HandledByNeutron(p.Annotations) {
-		c.neutronController.ntrnCli.RememberPortID(key, p.Annotations[neutron.PORT_ID])
+		c.neutronController.ntrnCli.RememberPortID(key, p.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")])
 	}
 
 	if !c.config.NoOVN {
@@ -483,27 +484,82 @@ func (c *Controller) handleAddPod(key string) error {
 			return err
 		}
 
-		networkID := pod.Annotations[neutron.NETWORK_ID]
-		subnetID := pod.Annotations[neutron.SUBNET_ID]
-		fixIP := pod.Annotations[neutron.FIX_IP]
-		projectID := pod.Annotations[neutron.KURYR_PROJECT_ID]
-		sgs := pod.Annotations[neutron.KURYR_SECURITY_GROUPS]
+		// 如果 Pod 的注解上没有 "neutron.kubernetes.io/neutron_port" 所标注的 port，
+		// 则根据注解中的网络详情创建一个 Port CR, 并更新注解
+		if _, ok := pod.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")]; !ok {
+			networkID := pod.Annotations[neutron.NETWORK_ID]
+			subnetID := pod.Annotations[neutron.KURYR_SUBNET_ID]
+			fixIP := pod.Annotations[neutron.FIX_IP]
+			projectID := pod.Annotations[neutron.KURYR_PROJECT_ID]
+			sgs := pod.Annotations[neutron.KURYR_SECURITY_GROUPS]
 
-		port, err := c.neutronController.ntrnCli.CreatePort(key, projectID, networkID, subnetID, fixIP, sgs)
-		if err != nil {
-			return fmt.Errorf("create Neutron Port failure, name: %s, network: %s, subnet: %s, %w",
-				name, networkID, subnetID, err)
+			newPort := &neutronv1.Port{
+				TypeMeta: metav1.TypeMeta{},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: neutronv1.PortSpec{
+					Name:            name,
+					ProjectID:       projectID,
+					NetworkID:       networkID,
+					SubnetID:        subnetID,
+					SecurityGroupID: []string{sgs},
+					FixIP:           fixIP,
+					DeleteByPod:     true,
+				},
+			}
+
+			_, err := c.neutronController.kubeNtrnCli.KubeovnV1().Ports(pod.Namespace).Create(context.TODO(), newPort, metav1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("create Neutron Port failure to API Server, name: %s, network: %s, subnet: %s, %w",
+					name, networkID, subnetID, err)
+			}
+			pod.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")] = newPort.Name
 		}
-		klog.Infof("Neutron Port created for Pod %s, ID: %s", key, port.ID)
-		pod.Annotations[neutron.PORT_ID] = port.ID
-		provider := "ovn"
-		pod.Annotations[fmt.Sprintf(util.MacAddressAnnotationTemplate, provider)] = port.MAC
-		pod.Annotations[fmt.Sprintf(util.IpAddressAnnotationTemplate, provider)] = port.IP
-		pod.Annotations[fmt.Sprintf(util.CidrAnnotationTemplate, provider)] = port.CIDR
-		pod.Annotations[fmt.Sprintf(util.GatewayAnnotationTemplate, provider)] = port.Gateway
-		pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, provider)] = port.SubnetID
-		pod.Annotations[fmt.Sprintf(util.ProviderNetworkMtuTemplate, provider)] = strconv.Itoa(port.MTU)
-		pod.Annotations[fmt.Sprintf(util.AllocatedAnnotationTemplate, provider)] = "true"
+
+		for i := 0; i < 16; i++ {
+			portName := pod.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")]
+			port, err := c.neutronController.portsLister.Ports(pod.Namespace).Get(portName)
+			if err != nil {
+				klog.V(3).Infof("listing port %s/%s error: %v", pod.Namespace, portName, err)
+				time.Sleep(time.Second)
+				continue
+			}
+			if !port.Status.IsConditionTrue(neutronv1.ConditionCreated) {
+				klog.V(3).Infof("waite Neutron create port %s/%s", pod.Namespace, portName)
+				time.Sleep(time.Second)
+				continue
+			}
+
+			klog.Infof("Neutron Port created for Pod %s, ID: %s", key, port.Status.ID)
+			pod.Annotations[neutron.PORT_ID] = port.Status.ID
+			provider := "ovn"
+			pod.Annotations[fmt.Sprintf(util.MacAddressAnnotationTemplate, provider)] = port.Status.MAC
+			pod.Annotations[fmt.Sprintf(util.IpAddressAnnotationTemplate, provider)] = port.Status.IP
+			pod.Annotations[fmt.Sprintf(util.CidrAnnotationTemplate, provider)] = port.Status.CIDR
+			pod.Annotations[fmt.Sprintf(util.GatewayAnnotationTemplate, provider)] = port.Status.Gateway
+			pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, provider)] = port.Spec.SubnetID
+			pod.Annotations[fmt.Sprintf(util.ProviderNetworkMtuTemplate, provider)] = strconv.Itoa(port.Status.MTU)
+			pod.Annotations[fmt.Sprintf(util.AllocatedAnnotationTemplate, provider)] = "true"
+			break
+		}
+
+		// port, err := c.neutronController.ntrnCli.CreatePort(key, projectID, networkID, subnetID, fixIP, sgs)
+		// if err != nil {
+		// return fmt.Errorf("create Neutron Port failure, name: %s, network: %s, subnet: %s, %w",
+		// name, networkID, subnetID, err)
+		// }
+		// klog.Infof("Neutron Port created for Pod %s, ID: %s", key, port.ID)
+		// pod.Annotations[neutron.PORT_ID] = port.ID
+		// provider := "ovn"
+		// pod.Annotations[fmt.Sprintf(util.MacAddressAnnotationTemplate, provider)] = port.MAC
+		// pod.Annotations[fmt.Sprintf(util.IpAddressAnnotationTemplate, provider)] = port.IP
+		// pod.Annotations[fmt.Sprintf(util.CidrAnnotationTemplate, provider)] = port.CIDR
+		// pod.Annotations[fmt.Sprintf(util.GatewayAnnotationTemplate, provider)] = port.Gateway
+		// pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, provider)] = port.SubnetID
+		// pod.Annotations[fmt.Sprintf(util.ProviderNetworkMtuTemplate, provider)] = strconv.Itoa(port.MTU)
+		// pod.Annotations[fmt.Sprintf(util.AllocatedAnnotationTemplate, provider)] = "true"
 
 		//  TODO: 要把这些注解补齐， CNI 在配置 Pod 网络时会用到
 		//	ingress = pod.Annotations[fmt.Sprintf(util.IngressRateAnnotationTemplate, podRequest.Provider)]
@@ -656,16 +712,27 @@ func (c *Controller) handleDeletePod(pod *v1.Pod) error {
 		return nil
 	}
 
-	// If the deleted pod has a Neutron port ID stored,
-	// delete that port and exit the function to avoid
-	// ovn releated operations
-	if port, ok := c.neutronController.ntrnCli.PodToPortID(key); ok {
-		klog.Infof("Deleting Neutron port, name: %s, id: %s", key, port)
-		err := c.neutronController.ntrnCli.DeletePort(port)
-		if err == nil {
-			c.neutronController.ntrnCli.ForgetPortID(key)
+	// 如果 Pod 挂载的是 Neutron 的 Port
+	if portName, ok := c.neutronController.ntrnCli.PodToPortID(key); ok {
+		port, err := c.neutronController.portsLister.Ports(pod.Namespace).Get(portName)
+		if err != nil {
+			klog.Infof("Getting Neutron port failed, name: %s/%s, err: %v", pod.Namespace, portName, err)
+			return nil
 		}
-		return err
+		if port.Spec.DeleteByPod { // 随 Pod 创建，随 Pod 删除
+			klog.Infof("Deleting Neutron port, name: %s", portName)
+			if err := c.neutronController.kubeNtrnCli.KubeovnV1().Ports(pod.Namespace).Delete(context.TODO(), port.Name, metav1.DeleteOptions{}); err != nil {
+				klog.Infof("Deleting Neutron port failed, name: %s/%s, err: %v", pod.Namespace, portName, err)
+			}
+		} else {
+			port.Status.BindPod = ""
+			err = c.neutronController.patchPortStatus(port)
+			if err != nil {
+				klog.Errorf("updating port status error: %v", err)
+			}
+		}
+		c.neutronController.ntrnCli.ForgetPortID(key)
+		return nil
 	}
 
 	if c.config.NoOVN {

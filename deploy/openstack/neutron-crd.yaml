@@ -11,30 +11,9 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
-      - name: Name
-        type: string
-        jsonPath: .spec.name
-      - name: NetworkID
-        type: string
-        jsonPath: .spec.networkId
-      - name: SubnetID
-        type: string
-        jsonPath: .spec.subnetId
-      - name: SecurityGroupID
-        type: string
-        jsonPath: .spec.securityGroupId
       - name: IP
         type: string
-        jsonPath: .spec.ip
-      - name: gateway
-        type: string
-        jsonPath: .status.gateway
-      - name: CIDR
-        type: string
-        jsonPath: .status.cidr
-      - name: MAC
-        type: string
-        jsonPath: .spec.mac
+        jsonPath: .status.ip
       schema:
         openAPIV3Schema:
           type: object
@@ -44,6 +23,14 @@ spec:
               properties:
                 id:
                   type: string
+                ip:
+                  type: string
+                mac:
+                  type: string
+                securityGroupId:
+                  type: array
+                  items:
+                    type: string
                 cidr:
                   type: string
                 gateway:
@@ -76,6 +63,8 @@ spec:
               properties:
                 name:
                   type: string
+                projectId:
+                  type: string
                 networkId:
                   type: string
                 subnetId:
@@ -84,10 +73,12 @@ spec:
                   type: array
                   items:
                     type: string
-                ip:
+                fixIp:
                   type: string
-                mac:
+                fixMac:
                   type: string
+                deleteByPod:
+                  type: boolean
   scope: Namespaced
   names:
     plural: ports

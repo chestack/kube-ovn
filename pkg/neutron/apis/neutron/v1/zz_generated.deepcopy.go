@@ -134,6 +134,11 @@ func (in *PortStatus) DeepCopyInto(out *PortStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.SecurityGroupID != nil {
+		in, out := &in.SecurityGroupID, &out.SecurityGroupID
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

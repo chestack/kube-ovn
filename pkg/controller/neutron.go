@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/kubeovn/kube-ovn/pkg/neutron"
@@ -12,7 +13,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	k8s "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
@@ -41,9 +41,7 @@ type NeutronController struct {
 }
 
 func MustNewNeutronController(config *Configuration) *NeutronController {
-	utilruntime.Must(neutronv1.AddToScheme(scheme.Scheme))
-	kubeNtrnCli, err := clientset.NewForConfig(config.KubeRestConfig)
-	utilruntime.Must(err)
+	kubeNtrnCli := neutron.NewClientset(config.KubeRestConfig)
 
 	informerFactory := informer.NewSharedInformerFactoryWithOptions(kubeNtrnCli, 0,
 		informer.WithTweakListOptions(func(listOption *metav1.ListOptions) {
@@ -70,54 +68,67 @@ func MustNewNeutronController(config *Configuration) *NeutronController {
 	}
 
 	portsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.enqueue(c.addPortQueue, "addPortQueue", true),
-		DeleteFunc: c.enqueue(c.deletePortQueue, "deletePortQueue", false),
-		UpdateFunc: c.enqueue2(c.updatePortQueue, "updatePortQueue", true),
+		AddFunc:    c.enqueueAddPort,
+		DeleteFunc: c.enqueueDelPort,
+		UpdateFunc: c.enqueueUpdatePort,
 	})
 
 	return c
 }
 
-// enqueue 返回将 k8s 资源放进相关队列的闭包
-// keyOnly: 决定是放 命名空间/资源名称 的key，还是资源实例。当删除一个资源时，用 key 查不到，只能放实例
-func (c *NeutronController) enqueue(q workqueue.Interface, qName string, keyOnly bool) func(interface{}) {
-	return func(obj interface{}) {
-		if !c.isLeader() {
-			return
-		}
-		key, err := cache.MetaNamespaceKeyFunc(obj)
-		if err != nil {
-			utilruntime.HandleError(err)
-			return
-		}
-
-		klog.Infof("enqueue %s to %s", key, qName)
-		if keyOnly {
-			q.Add(key)
-		} else {
-			q.Add(obj)
-		}
+func (c *NeutronController) enqueueAddPort(obj interface{}) {
+	if !c.isLeader() {
+		return
 	}
+
+	port := obj.(*neutronv1.Port)
+	if port.Status.IsConditionTrue(neutronv1.ConditionCreated) {
+		return
+	}
+
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+
+	klog.Infof("enqueue %s to %s", key, "addPortQueue")
+	c.addPortQueue.Add(obj)
 }
 
-func (c *NeutronController) enqueue2(q workqueue.Interface, qName string, keyOnly bool) func(old, new interface{}) {
-	return func(old, new interface{}) {
-		var enqueue bool
-		oldPort, ok := old.(*neutronv1.Port)
-		newPort, ok1 := new.(*neutronv1.Port)
-		if ok && ok1 {
-			if oldPort.ResourceVersion != newPort.ResourceVersion {
-				enqueue = true
-			}
-			if !newPort.DeletionTimestamp.IsZero() {
-				enqueue = false
-			}
-		}
+func (c *NeutronController) enqueueDelPort(obj interface{}) {
+	if !c.isLeader() {
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
 
-		// 如果未来加入了新的资源类型，先尝试转换类型再逻辑判断，最后决定添加与否
-		if enqueue {
-			c.enqueue(q, qName, keyOnly)(new)
+	klog.Infof("enqueue %s to %s", key, "delPortQueue")
+	c.deletePortQueue.Add(obj)
+}
+
+func (c *NeutronController) enqueueUpdatePort(old, new interface{}) {
+	var recnsl bool
+	oldPort, ok := old.(*neutronv1.Port)
+	newPort, ok1 := new.(*neutronv1.Port)
+	if ok && ok1 {
+		if oldPort.ResourceVersion != newPort.ResourceVersion {
+			recnsl = true
 		}
+		if !newPort.DeletionTimestamp.IsZero() {
+			recnsl = false
+		}
+	}
+	if reflect.DeepEqual(oldPort.Spec, newPort.Spec) {
+		recnsl = false
+	}
+
+	if recnsl {
+		klog.Infof("enqueue %s to %s", newPort.Name, "updatePortQueue")
+		c.updatePortQueue.Add(new)
 	}
 }
 
@@ -169,7 +180,7 @@ func runWorker(action string, q workqueue.RateLimitingInterface, handle func(int
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err != nil {
 				q.Forget(obj)
-				utilruntime.HandleError(fmt.Errorf("expected string or metav1.Object in workqueue but got %#v", obj))
+				utilruntime.HandleError(fmt.Errorf("expected string or metav1.Object in workqueue but got %#v, err: %v", obj, err))
 				return nil
 			}
 

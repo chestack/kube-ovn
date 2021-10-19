@@ -8,6 +8,11 @@ import (
 	"sync"
 	"time"
 
+	neutronv1 "github.com/kubeovn/kube-ovn/pkg/neutron/apis/neutron/v1"
+	clientset "github.com/kubeovn/kube-ovn/pkg/neutron/client/clientset/versioned"
+	"github.com/kubeovn/kube-ovn/pkg/neutron/client/clientset/versioned/scheme"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog"
 )
 
@@ -25,6 +30,18 @@ const (
 	ANNO_ECNS_DEF_NETWORK = "v1.multus-cni.io/default-network"
 	SEC_CON_KUBE_OVN      = "secure-container/kube-ovn"
 )
+
+func NewClientset(kubeconfig *rest.Config) clientset.Interface {
+	old := kubeconfig.ContentType
+	defer func() {
+		kubeconfig.ContentType = old
+	}()
+	kubeconfig.ContentType = "application/json"
+	utilruntime.Must(neutronv1.AddToScheme(scheme.Scheme))
+	kubeNtrnCli, err := clientset.NewForConfig(kubeconfig)
+	utilruntime.Must(err)
+	return kubeNtrnCli
+}
 
 type Client struct {
 	networkCliV2 *gophercloud.ServiceClient

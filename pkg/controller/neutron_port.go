@@ -33,7 +33,11 @@ func (c *NeutronController) runUpdatePortWorker() func() {
 }
 
 func (c *NeutronController) handleAddPort(obj interface{}) error {
-	key := obj.(string)
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("expected string or metav1.Object in workqueue but got %#v, err: %v", obj, err))
+		return err
+	}
 	c.portKeyMutex.Lock(key)
 	defer c.portKeyMutex.Unlock(key)
 
@@ -51,38 +55,33 @@ func (c *NeutronController) handleAddPort(obj interface{}) error {
 		return err
 	}
 
-	//TODO: projectID, sgs 改
-	p, err := c.ntrnCli.CreatePort(key, "", port.Spec.NetworkID, port.Spec.SubnetID, port.Spec.IP, "")
+	defer func() {
+		err = c.patchPortStatus(port)
+		if err != nil {
+			klog.Errorf("updating port status error: %v", err)
+		}
+	}()
+
+	sgs := ""
+	if len(port.Spec.SecurityGroupID) > 0 {
+		sgs = port.Spec.SecurityGroupID[0]
+	}
+	p, err := c.ntrnCli.CreatePort(key, port.Spec.ProjectID, port.Spec.NetworkID, port.Spec.SubnetID, port.Spec.FixIP, sgs)
 	if err != nil {
-		klog.Errorf("creating port error %v", err)
+		port.Status.SetError("create Neutron port failed", err.Error())
+
+		klog.Errorf("creating port error: %v", err)
 		return err
 	}
 
-	if port.Spec.IP == "" {
-		port.Spec.IP = p.IP
-	}
-	if port.Spec.MAC == "" {
-		port.Spec.MAC = p.MAC
-	}
-	if len(port.Spec.SecurityGroupID) == 0 {
-		port.Spec.SecurityGroupID = p.Sgs
-	}
-
-	err = c.updatePort(port)
-	if err != nil {
-		// TODO: 要回滚创建
-		klog.Errorf("updating port error: %v", err)
-	}
-
+	port.Status.SetCondition(neutronv1.ConditionCreated, "", "")
 	port.Status.ID = p.ID
+	port.Status.IP = p.IP
+	port.Status.MAC = p.MAC
+	port.Status.SecurityGroupID = p.Sgs
 	port.Status.CIDR = p.CIDR
 	port.Status.Gateway = p.Gateway
 	port.Status.MTU = p.MTU
-
-	err = c.patchPortStatus(port)
-	if err != nil {
-		klog.Errorf("updating port status error: %v", err)
-	}
 
 	return nil
 }
@@ -93,13 +92,17 @@ func (c *NeutronController) handleDeletePort(obj interface{}) error {
 	if err != nil {
 		return err
 	}
-	return errors.New("not implemented yet")
+	return nil
 }
 
 func (c *NeutronController) handleUpdatePort(obj interface{}) error {
-	key := obj.(string)
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("expected string or metav1.Object in workqueue but got %#v, err: %v", obj, err))
+		return err
+	}
 	_ = key
-	return errors.New("not implemented yet")
+	return errors.New("handling port update not implemented yet")
 }
 
 func (c *NeutronController) updatePort(port *neutronv1.Port) error {
