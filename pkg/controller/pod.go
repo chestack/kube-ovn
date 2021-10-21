@@ -147,7 +147,7 @@ func (c *Controller) enqueueDeletePod(obj interface{}) {
 	}
 	// if the deleted pod is on Neutron network, store the Port ID for later use
 	if neutron.HandledByNeutron(p.Annotations) {
-		c.neutronController.ntrnCli.RememberPortID(key, p.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")])
+		c.neutronController.ntrnCli.RememberPortID(key, p.Annotations[neutron.PORT_NAME])
 	}
 
 	if !c.config.NoOVN {
@@ -484,9 +484,9 @@ func (c *Controller) handleAddPod(key string) error {
 			return err
 		}
 
-		// 如果 Pod 的注解上没有 "neutron.kubernetes.io/neutron_port" 所标注的 port，
+		// 如果 Pod 的注解上没有 "openstack.org/neutron_port" 所标注的 port，
 		// 则根据注解中的网络详情创建一个 Port CR, 并更新注解
-		if _, ok := pod.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")]; !ok {
+		if _, ok := pod.Annotations[neutron.PORT_NAME]; !ok {
 			networkID := pod.Annotations[neutron.NETWORK_ID]
 			subnetID := pod.Annotations[neutron.KURYR_SUBNET_ID]
 			fixIP := pod.Annotations[neutron.FIX_IP]
@@ -515,11 +515,11 @@ func (c *Controller) handleAddPod(key string) error {
 				return fmt.Errorf("create Neutron Port failure to API Server, name: %s, network: %s, subnet: %s, %w",
 					name, networkID, subnetID, err)
 			}
-			pod.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")] = newPort.Name
+			pod.Annotations[neutron.PORT_NAME] = newPort.Spec.Name
 		}
 
 		for i := 0; i < 16; i++ {
-			portName := pod.Annotations[fmt.Sprintf(util.NeutronPortTemplate, "neutron")]
+			portName := pod.Annotations[neutron.PORT_NAME]
 			port, err := c.neutronController.portsLister.Ports(pod.Namespace).Get(portName)
 			if err != nil {
 				klog.V(3).Infof("listing port %s/%s error: %v", pod.Namespace, portName, err)

@@ -52,7 +52,6 @@ const (
 	SecurityGroupAnnotationTemplate = "%s.kubernetes.io/security_groups"
 	LiveMigrationAnnotationTemplate = "%s.kubernetes.io/allow_live_migration"
 	DefaultRouteAnnotationTemplate  = "%s.kubernetes.io/default_route"
-	NeutronPortTemplate             = "%s.kubernetes.io/neutron_port"
 
 	ProviderNetworkTemplate          = "%s.kubernetes.io/provider_network"
 	ProviderNetworkReadyTemplate     = "%s.provider-network.kubernetes.io/ready"
