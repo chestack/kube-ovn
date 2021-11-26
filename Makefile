@@ -1,5 +1,9 @@
 GO_VERSION = 1.16
 
+ECNS_X86_REGISTRY = hub.easystack.io/captain
+ECNS_ARM_REGISTRY = hub.easystack.io/arm64v8
+ECNS_RELEASE_TAG = v1
+
 REGISTRY = kubeovn
 DEV_TAG = dev
 RELEASE_TAG = $(shell cat VERSION)
@@ -12,7 +16,7 @@ ARCH = amd64
 
 .PHONY: build-go
 build-go:
-	go mod tidy
+	#go mod tidy
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o $(CURDIR)/dist/images/kube-ovn -ldflags $(GOLDFLAGS) -v ./cmd/cni
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o $(CURDIR)/dist/images/kube-ovn-cmd -ldflags $(GOLDFLAGS) -v ./cmd
 
@@ -47,6 +51,14 @@ base-amd64:
 base-arm64:
 	docker buildx build --platform linux/arm64 --build-arg ARCH=arm64 -t $(REGISTRY)/kube-ovn-base:$(RELEASE_TAG)-arm64 -o type=docker -f dist/images/Dockerfile.base dist/images/
 
+.PHONY: ecns-build-release-x86
+ecns-build-release-x86: build-go
+	docker buildx build --platform linux/amd64 --build-arg ARCH=amd64 -t $(ECNS_X86_REGISTRY)/kube-ovn:$(ECNS_RELEASE_TAG) -o type=docker -f dist/images/Dockerfile dist/images/
+
+.PHONY: ecns-build-release-arm
+ecns-build-release-arm: build-go-arm
+	docker buildx build --platform linux/arm64 --build-arg ARCH=arm64 -t $(ECNS_ARM_REGISTRY)/kube-ovn:$(ECNS_RELEASE_TAG) -o type=docker -f dist/images/Dockerfile dist/images/
+
 .PHONY: release
 release: lint build-go
 	docker buildx build --platform linux/amd64 --build-arg ARCH=amd64 -t $(REGISTRY)/kube-ovn:$(RELEASE_TAG) -o type=docker -f dist/images/Dockerfile dist/images/
@@ -60,6 +72,11 @@ release-arm: build-go-arm
 .PHONY: push-dev
 push-dev:
 	docker push $(REGISTRY)/kube-ovn:$(DEV_TAG)
+
+.PHONY: ecns-push-release
+ecns-push-release:
+	docker push $(ECNS_X86_REGISTRY)/kube-ovn:$(ECNS_RELEASE_TAG)
+	docker push $(ECNS_ARM_REGISTRY)/kube-ovn:$(ECNS_RELEASE_TAG)
 
 .PHONY: push-release
 push-release: release
