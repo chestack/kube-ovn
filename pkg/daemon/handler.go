@@ -230,18 +230,20 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 			return
 		}
 
-		//更新 Neutron Port 的 hostID, devive owner 和 id(pod的uid作为 port 的 device id)
-		err = csh.Controller.neutronClient.BindPort(portID, pod.Spec.NodeName, string(pod.ObjectMeta.UID))
-		if err != nil {
-			klog.Errorf("binding port failed. pod %s/%s, port %s, hostId %s:", pod.Namespace, pod.Name,
-				portID, pod.Spec.NodeName)
-			klog.Errorf("error is %v", err)
-			return
-		}
+		if neutron.HandledByNeutron(pod.Annotations) {
+			//更新 Neutron Port 的 hostID, devive owner 和 id(pod的uid作为 port 的 device id)
+			err = csh.Controller.neutronClient.BindPort(portID, pod.Spec.NodeName, string(pod.ObjectMeta.UID))
+			if err != nil {
+				klog.Errorf("binding port failed. pod %s/%s, port %s, hostId %s:", pod.Namespace, pod.Name,
+					portID, pod.Spec.NodeName)
+				klog.Errorf("error is %v", err)
+				return
+			}
 
-		if err = csh.Controller.neutronClient.WaitPortActive(portID, 60); err != nil {
-			klog.Errorf("waiting port %s become ACTIVE timeout", portID)
-			return
+			if err = csh.Controller.neutronClient.WaitPortActive(portID, 60); err != nil {
+				klog.Errorf("waiting port %s become ACTIVE timeout", portID)
+				return
+			}
 		}
 
 		if err = csh.Controller.addEgressConfig(podSubnet, ip); err != nil && !neutron.HandledByNeutron(pod.Annotations) {

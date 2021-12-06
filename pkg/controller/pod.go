@@ -116,10 +116,6 @@ func (c *Controller) enqueueAddPod(obj interface{}) {
 		return
 	}
 
-	if !neutron.HandledByNeutron(p.Annotations) {
-		return
-	}
-
 	klog.V(3).Infof("enqueue add pod %s", key)
 	c.addPodQueue.Add(key)
 }
@@ -142,9 +138,6 @@ func (c *Controller) enqueueDeletePod(obj interface{}) {
 		}
 	}
 
-	if !neutron.HandledByNeutron(p.Annotations) {
-		return
-	}
 	// if the deleted pod is on Neutron network, store the Port ID for later use
 	if neutron.HandledByNeutron(p.Annotations) {
 		c.neutronController.ntrnCli.RememberPortID(key, p.Annotations[neutron.PORT_NAME])
