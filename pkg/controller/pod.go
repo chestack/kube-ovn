@@ -65,6 +65,14 @@ func (c *Controller) enqueueAddPod(obj interface{}) {
 	}
 
 	p := obj.(*v1.Pod)
+
+	// 社区版的 kube-ovn 是以其作为集群默认的 CNI 来设计的，informer 默认将所有集群上创建的 Pod
+	// 但在我们 EOS 中，只有符合下面两个条件的 Pod（根据注解）,由 multus 判断是否由 kube-ovn 来配置 Pod
+	// 的网卡。
+	if !(neutron.HandledByNeutron(p.Annotations) || neutron.HandledByKubeOvnOrigin(p.Annotations)) {
+		return
+	}
+
 	// TODO: we need to find a way to reduce duplicated np added to the queue
 	if c.config.EnableNP && p.Status.PodIP != "" && !c.config.NoOVN {
 		for _, np := range c.podMatchNetworkPolicies(p) {
@@ -349,6 +357,14 @@ func (c *Controller) processNextDeletePodWorkItem() bool {
 			utilruntime.HandleError(fmt.Errorf("expected pod in workqueue but got %#v", obj))
 			return nil
 		}
+
+		// 社区版的 kube-ovn 是以其作为集群默认的 CNI 来设计的，informer 默认将所有集群上被删除的 Pod
+		// 但在我们 EOS 中，只有符合下面两个条件的 Pod（根据注解）,由 multus 判断是否由 kube-ovn 来清理 Pod
+		// 的网卡。
+		if !(neutron.HandledByNeutron(pod.Annotations) || neutron.HandledByKubeOvnOrigin(pod.Annotations)) {
+			return nil
+		}
+
 		klog.Infof("handle delete pod %s", pod.Name)
 		if err := c.handleDeletePod(pod); err != nil {
 			c.deletePodQueue.AddRateLimited(obj)

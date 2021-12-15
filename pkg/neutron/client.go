@@ -28,8 +28,9 @@ const (
 	PORT_ID               = "openstack.org/port_id"
 	PORT_NAME             = "openstack.org/port_name"
 
-	ANNO_ECNS_DEF_NETWORK = "v1.multus-cni.io/default-network"
-	SEC_CON_KUBE_OVN      = "secure-container/kube-ovn"
+	ANNO_ECNS_DEF_NETWORK   = "v1.multus-cni.io/default-network"
+	SEC_CON_KUBE_OVN        = "secure-container/kube-ovn-neutron"
+	SEC_CON_KUBE_OVN_ORIGIN = "secure-container/kube-ovn"
 )
 
 func NewClientset(kubeconfig *rest.Config) clientset.Interface {
