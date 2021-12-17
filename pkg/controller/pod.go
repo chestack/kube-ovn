@@ -188,7 +188,18 @@ func (c *Controller) enqueueUpdatePod(oldObj, newObj interface{}) {
 		return
 	}
 
-	if c.config.EnableNP && !c.config.NoOVN {
+	// 目前如果是走 Neutron 配置网卡，没有什么针对 update 的实现，例如修改了
+	// network， subnet等，所以在此跳过
+	if neutron.HandledByNeutron(newPod.GetAnnotations()) {
+		return
+	}
+
+	// 如果 pod 不由原生 kube-ovn 来配置网络，也应该被忽略
+	if !neutron.HandledByKubeOvnOrigin(newPod.GetAnnotations()) {
+		return
+	}
+
+	if c.config.EnableNP {
 		if !reflect.DeepEqual(oldPod.Labels, newPod.Labels) {
 			oldNp := c.podMatchNetworkPolicies(oldPod)
 			newNp := c.podMatchNetworkPolicies(newPod)
@@ -202,14 +213,6 @@ func (c *Controller) enqueueUpdatePod(oldObj, newObj interface{}) {
 				c.updateNpQueue.Add(np)
 			}
 		}
-	}
-
-	//if newPod.Annotations != nil && neutron.HandledByNeutron(newPod.Annotations) {
-	//	return
-	//}
-	// 暂不支持对 Pod 升级的处理
-	if true {
-		return
 	}
 
 	if newPod.Spec.HostNetwork {
