@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -27,6 +28,9 @@ func (c *Controller) inspectPod() error {
 		return err
 	}
 	for _, oripod := range pods {
+		if !(neutron.HandledByKubeOvnOrigin(oripod.GetAnnotations()) || neutron.HandledByNeutron(oripod.GetAnnotations())) {
+			continue
+		}
 		pod := oripod.DeepCopy()
 		if pod.Spec.HostNetwork {
 			continue
