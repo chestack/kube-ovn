@@ -13,6 +13,7 @@ import (
 	"k8s.io/klog/v2"
 
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/util"
 )
@@ -297,6 +298,10 @@ func (c *Controller) InitIPAM() error {
 		return err
 	}
 	for _, pod := range pods {
+		// 在 EOS 中，只有符合下面两个条件的 Pod，才走 kube-ovn 来配置网络。不符合的一概忽略
+		if !(neutron.HandledByNeutron(pod.GetAnnotations()) || neutron.HandledByKubeOvnOrigin(pod.GetAnnotations())) {
+			continue
+		}
 		if isPodAlive(pod) && pod.Annotations[util.AllocatedAnnotation] == "true" {
 			podNets, err := c.getPodKubeovnNets(pod)
 			if err != nil {
