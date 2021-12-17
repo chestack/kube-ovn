@@ -620,10 +620,15 @@ func (c *Controller) setExGateway() error {
 	}
 	enable := node.Labels[util.ExGatewayLabel]
 	if enable == "true" {
-		cm, err := c.config.KubeClient.CoreV1().ConfigMaps("kube-system").Get(context.Background(), util.ExternalGatewayConfig, metav1.GetOptions{})
+		cm, err := c.config.KubeClient.CoreV1().ConfigMaps(c.config.ExternalGatewayNS).Get(context.Background(), util.ExternalGatewayConfig, metav1.GetOptions{})
 		if err != nil {
 			klog.Errorf("failed to get ovn-external-gw-config, %v", err)
 			return err
+		}
+		//(wangbo) external-gw-config exists but without 'external-gw-nic', reuse br-ex.
+		linkname ,exist := cm.Data["external-gw-nic"]
+		if !exist || len(linkname) == 0 {
+			return nil
 		}
 		link, err := netlink.LinkByName(cm.Data["external-gw-nic"])
 		if err != nil {

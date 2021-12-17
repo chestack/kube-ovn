@@ -47,6 +47,8 @@ type Configuration struct {
 
 	// 表示集群节点中未安装 ovn，只能调用 Neutron 相关接口。初始化时从环境变量中配置
 	NoOVN bool
+	ExternalGatewayNS     string
+	ExternalGatewayNet    string
 }
 
 // ParseFlags will parse cmd args then init kubeClient and configuration
@@ -68,6 +70,9 @@ func ParseFlags() (*Configuration, error) {
 		argsNetworkType          = pflag.String("network-type", "geneve", "The ovn network type")
 		argsDefaultProviderName  = pflag.String("default-provider-name", "provider", "The vlan or vxlan type default provider interface name")
 		argsDefaultInterfaceName = pflag.String("default-interface-name", "", "The default host interface name in the vlan/vxlan type")
+
+		argExternalGatewayNS     = pflag.String("external-gateway-ns", "secure-container", "The namespace of configmap external-gateway-config, default: secure-container")
+		argExternalGatewayNet    = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
 	)
 
 	// mute info log for ipset lib
@@ -112,6 +117,8 @@ func ParseFlags() (*Configuration, error) {
 		NetworkType:           *argsNetworkType,
 		DefaultProviderName:   *argsDefaultProviderName,
 		DefaultInterfaceName:  *argsDefaultInterfaceName,
+		ExternalGatewayNS:     *argExternalGatewayNS,
+		ExternalGatewayNet:    *argExternalGatewayNet,
 	}
 
 	if err := config.initKubeClient(); err != nil {

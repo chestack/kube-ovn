@@ -70,9 +70,11 @@ type Configuration struct {
 	EnableNP          bool
 	EnableExternalVpc bool
 
-	MulticastPrivileged bool
 	// 表示集群节点中未安装 ovn，只能调用 Neutron 相关接口。初始化时从环境变量中配置
 	NoOVN bool
+	ExternalGatewayNS  string
+	ExternalGatewayNet string
+	ExternalGatewayVlanID int
 }
 
 // ParseFlags parses cmd args then init kubeclient and conf
@@ -109,12 +111,16 @@ func ParseFlags() (*Configuration, error) {
 		argNetworkType          = pflag.String("network-type", util.NetworkTypeGeneve, "The ovn network type")
 		argDefaultProviderName  = pflag.String("default-provider-name", "provider", "The vlan or vxlan type default provider interface name")
 		argDefaultInterfaceName = pflag.String("default-interface-name", "", "The default host interface name in the vlan/vxlan type")
-		argDefaultVlanName      = pflag.String("default-vlan-name", "ovn-vlan", "The default vlan name")
-		argDefaultVlanID        = pflag.Int("default-vlan-id", 1, "The default vlan id")
-		argPodNicType           = pflag.String("pod-nic-type", "veth-pair", "The default pod network nic implementation type")
-		argEnableLb             = pflag.Bool("enable-lb", true, "Enable load balancer")
-		argEnableNP             = pflag.Bool("enable-np", true, "Enable network policy support")
-		argEnableExternalVpc    = pflag.Bool("enable-external-vpc", true, "Enable external vpc support")
+		argDefaultVlanName      = pflag.String("default-vlan-name", "ovn-vlan", "The default vlan name, default: ovn-vlan")
+		argDefaultVlanID        = pflag.Int("default-vlan-id", 1, "The default vlan id, default: 1")
+		argPodNicType           = pflag.String("pod-nic-type", "veth-pair", "The default pod network nic implementation type, default: veth-pair")
+		argEnableLb             = pflag.Bool("enable-lb", true, "Enable load balancer, default: true")
+		argEnableNP             = pflag.Bool("enable-np", true, "Enable network policy support, default: true")
+		argEnableExternalVpc    = pflag.Bool("enable-external-vpc", true, "Enable external vpc support, default: true")
+
+		argExternalGatewayNS     = pflag.String("external-gateway-ns", "secure-container", "The namespace of configmap external-gateway-config, default: secure-container")
+		argExternalGatewayNet    = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
+		argExternalGatewayVlanID = pflag.Int("external-gateway-vlanid", 0, "The vlanId of port ln-ovn-external, default: 0")
 	)
 
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
@@ -168,6 +174,9 @@ func ParseFlags() (*Configuration, error) {
 		EnableLb:                      *argEnableLb,
 		EnableNP:                      *argEnableNP,
 		EnableExternalVpc:             *argEnableExternalVpc,
+		ExternalGatewayNS:             *argExternalGatewayNS,
+		ExternalGatewayNet:            *argExternalGatewayNet,
+		ExternalGatewayVlanID:         *argExternalGatewayVlanID,
 	}
 
 	if config.NetworkType == util.NetworkTypeVlan && config.DefaultHostInterface == "" {
