@@ -27,7 +27,7 @@ const (
 
 func (c Client) ovnNbCommand(cmdArgs ...string) (string, error) {
 	start := time.Now()
-	cmdArgs = append([]string{fmt.Sprintf("--timeout=%d", c.OvnTimeout), "--wait=sb"}, cmdArgs...)
+	cmdArgs = append([]string{fmt.Sprintf("--timeout=%d", c.OvnTimeout), "--wait=sb", "--no-leader-only"}, cmdArgs...)
 	raw, err := exec.Command(OvnNbCtl, cmdArgs...).CombinedOutput()
 	elapsed := float64((time.Since(start)) / time.Millisecond)
 	klog.V(4).Infof("command %s %s in %vms, output %q", OvnNbCtl, strings.Join(cmdArgs, " "), elapsed, raw)
@@ -468,7 +468,7 @@ func (c Client) CreateGatewaySwitch(name, ip, mac string, chassises []string, ex
 	}
 	if externalgatewayvlanid > 0 {
 		portVlanId := fmt.Sprintf("tag=%d", externalgatewayvlanid)
-		_, err := c.ovnNbCommand("set", "logical_switch_port",  localnetPort,  portVlanId)
+		_, err := c.ovnNbCommand("set", "logical_switch_port", localnetPort, portVlanId)
 		if err != nil {
 			return fmt.Errorf("failed to set vlanId for ,%s, %v", localnetPort, err)
 		}

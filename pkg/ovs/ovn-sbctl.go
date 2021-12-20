@@ -22,6 +22,7 @@ func (c Client) ovnSbCommand(cmdArgs ...string) (string, error) {
 			"-C", "/var/run/tls/cacert"}, cmdArgs...)
 	} else {
 		cmdArgs = append([]string{
+			"--no-leader-only",
 			fmt.Sprintf("--timeout=%d", c.OvnTimeout),
 			fmt.Sprintf("--db=%s", c.OvnSbAddress)}, cmdArgs...)
 	}
