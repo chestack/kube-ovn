@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/util"
 )
@@ -205,6 +206,9 @@ func (c *Controller) markAndCleanLSP() error {
 	}
 	ipNames := make([]string, 0, len(pods)+len(nodes))
 	for _, pod := range pods {
+		if !(neutron.HandledByNeutron(pod.GetAnnotations()) || neutron.HandledByKubeOvnOrigin(pod.GetAnnotations())) {
+			continue
+		}
 		if isStsPod, sts := isStatefulSetPod(pod); isStsPod {
 			if isStatefulSetPodToDel(c.config.KubeClient, pod, sts) {
 				continue
