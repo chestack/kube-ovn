@@ -206,7 +206,8 @@ func (c *Controller) markAndCleanLSP() error {
 	}
 	ipNames := make([]string, 0, len(pods)+len(nodes))
 	for _, pod := range pods {
-		if !(neutron.HandledByNeutron(pod.GetAnnotations()) || neutron.HandledByKubeOvnOrigin(pod.GetAnnotations())) {
+		//TODO (fix me) ignore non-ovn pod
+		if !neutron.HandledByKubeOvnOrigin(pod.GetAnnotations()) {
 			continue
 		}
 		if isStsPod, sts := isStatefulSetPod(pod); isStsPod {

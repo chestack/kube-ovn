@@ -18,6 +18,7 @@ import (
 	"k8s.io/klog/v2"
 
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/util"
 )
@@ -626,7 +627,7 @@ func (c *Controller) setExGateway() error {
 			return err
 		}
 		//(wangbo) external-gw-config exists but without 'external-gw-nic', reuse br-ex.
-		linkname ,exist := cm.Data["external-gw-nic"]
+		linkname, exist := cm.Data["external-gw-nic"]
 		if !exist || len(linkname) == 0 {
 			return nil
 		}
@@ -681,6 +682,10 @@ func (c *Controller) getLocalPodIPsNeedNAT(protocol string) ([]string, error) {
 			pod.DeletionTimestamp != nil ||
 			pod.Annotations[util.LogicalSwitchAnnotation] == "" ||
 			pod.Annotations[util.IpAddressAnnotation] == "" {
+			continue
+		}
+		//TODO (fix me) ignore non-ovn pod
+		if !neutron.HandledByKubeOvnOrigin(pod.Annotations) {
 			continue
 		}
 		subnet, err := c.subnetsLister.Get(pod.Annotations[util.LogicalSwitchAnnotation])
@@ -744,7 +749,10 @@ func (c *Controller) getLocalPodIPsNeedPR(protocol string) (map[policyRouteMeta]
 			pod.Annotations[util.IpAddressAnnotation] == "" {
 			continue
 		}
-
+		//TODO (fix me) ignore non-ovn pod
+		if !neutron.HandledByKubeOvnOrigin(pod.Annotations) {
+			continue
+		}
 		subnet, err := c.subnetsLister.Get(pod.Annotations[util.LogicalSwitchAnnotation])
 		if err != nil {
 			klog.Errorf("failed to get subnet %s: %+v", pod.Annotations[util.LogicalSwitchAnnotation], err)

@@ -73,6 +73,14 @@ func (c *Controller) enqueueAddPod(obj interface{}) {
 		return
 	}
 
+	if neutron.HandledByNeutron(p.Annotations) {
+		if p.Annotations != nil && p.Annotations[util.AllocatedAnnotation] != "true" {
+			klog.V(3).Infof("enqueue add pod %s", key)
+			c.addPodQueue.Add(key)
+		}
+		return
+	}
+
 	// TODO: we need to find a way to reduce duplicated np added to the queue
 	if c.config.EnableNP && p.Status.PodIP != "" && !c.config.NoOVN {
 		for _, np := range c.podMatchNetworkPolicies(p) {
