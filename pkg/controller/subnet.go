@@ -553,6 +553,11 @@ func (c *Controller) handleAddOrUpdateSubnet(key string) error {
 			return err
 		}
 		for _, node := range nodes {
+			//TODO skip some node which not in whiteList.
+			if !util.InWhiteList(node) {
+				klog.Infof("node %s is not in whiteList, not handle", node.Name)
+				continue
+			}
 			for _, addr := range node.Status.Addresses {
 				if addr.Type == v1.NodeInternalIP && util.CIDRContainIP(subnet.Spec.CIDRBlock, addr.Address) {
 					err = fmt.Errorf("subnet %s cidr %s conflict with node %s address %s", subnet.Name, subnet.Spec.CIDRBlock, node.Name, addr.Address)
@@ -661,6 +666,11 @@ func (c *Controller) updateNodeAddressSetsForSubnet(subnet *kubeovnv1.Subnet, de
 	}
 
 	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
 		nodeIPv4, nodeIPv6 := util.GetNodeInternalIP(*node)
 		v4CIDR, v6CIDR := util.SplitStringIP(subnet.Spec.CIDRBlock)
 		if err := c.handleNodeAddressSetForSubnet(v4CIDR, node.Name, nodeIPv4, 4, delete); err != nil {

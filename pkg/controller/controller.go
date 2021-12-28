@@ -524,6 +524,11 @@ func (c *Controller) startWorkers(stopCh <-chan struct{}) {
 			klog.Fatalf("failed to list nodes: %v", err)
 		}
 		for _, node := range nodes {
+			//TODO skip some node which not in whiteList.
+			if !util.InWhiteList(node) {
+				klog.Infof("node %s is not in whiteList, not handle", node.Name)
+				continue
+			}
 			if node.Annotations[util.AllocatedAnnotation] != "true" {
 				klog.Infof("wait node %s annotation ready", node.Name)
 				ready = false

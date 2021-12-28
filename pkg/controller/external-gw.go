@@ -73,6 +73,11 @@ func (c *Controller) removeExternalGateway() error {
 		return err
 	}
 	for _, orino := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(orino) {
+			klog.Infof("node %s is not in whiteList, not handle", orino.Name)
+			continue
+		}
 		no := orino.DeepCopy()
 		patchPayloadTemplate :=
 			`[{
@@ -110,6 +115,11 @@ func (c *Controller) establishExternalGateway(config map[string]string) error {
 	}
 	gwNodes := make([]string, 0, len(nodes))
 	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
 		gwNodes = append(gwNodes, node.Name)
 	}
 	if config["type"] != "distributed" {

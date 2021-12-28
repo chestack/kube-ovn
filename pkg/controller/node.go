@@ -203,6 +203,12 @@ func (c *Controller) handleAddNode(key string) error {
 	}
 	node := orinode.DeepCopy()
 
+	//TODO skip some node which not in whiteList.
+	if !util.InWhiteList(node) {
+		klog.Infof("node %s is not in whiteList, not handle", node.Name)
+		return nil
+	}
+
 	subnets, err := c.subnetsLister.List(labels.Everything())
 	if err != nil {
 		klog.Errorf("failed to list subnets: %v", err)

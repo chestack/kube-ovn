@@ -77,6 +77,11 @@ func (c *Controller) resyncInterConnection() {
 			return
 		}
 		for _, node := range nodes {
+			//TODO skip some node which not in whiteList.
+			if !util.InWhiteList(node) {
+				klog.Infof("node %s is not in whiteList, not handle", node.Name)
+				continue
+			}
 			ipv4, ipv6 := util.GetNodeInternalIP(*node)
 			if ipv4 != "" {
 				blackList = append(blackList, ipv4)
@@ -113,6 +118,11 @@ func (c *Controller) removeInterConnection(azName string) error {
 		return err
 	}
 	for _, orino := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(orino) {
+			klog.Infof("node %s is not in whiteList, not handle", orino.Name)
+			continue
+		}
 		no := orino.DeepCopy()
 		patchPayloadTemplate :=
 			`[{

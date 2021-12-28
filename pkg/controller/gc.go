@@ -158,6 +158,11 @@ func (c *Controller) gcNode() error {
 	}
 	nodeNames := make([]string, 0, len(nodes))
 	for _, no := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(no) {
+			klog.Infof("node %s is not in whiteList, not handle", no.Name)
+			continue
+		}
 		nodeNames = append(nodeNames, no.Name)
 	}
 	ips, err := c.ipsLister.List(labels.Everything())
@@ -234,6 +239,11 @@ func (c *Controller) markAndCleanLSP() error {
 		}
 	}
 	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
 		if node.Annotations[util.AllocatedAnnotation] == "true" {
 			ipNames = append(ipNames, fmt.Sprintf("node-%s", node.Name))
 		}
@@ -499,6 +509,11 @@ func (c *Controller) gcPortGroup() error {
 			return err
 		}
 		for _, node := range nodes {
+			//TODO skip some node which not in whiteList.
+			if !util.InWhiteList(node) {
+				klog.Infof("node %s is not in whiteList, not handle", node.Name)
+				continue
+			}
 			npNames = append(npNames, fmt.Sprintf("%s/%s", "node", node.Name))
 		}
 	}

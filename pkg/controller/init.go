@@ -356,6 +356,11 @@ func (c *Controller) InitIPAM() error {
 		return err
 	}
 	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
 		if node.Annotations[util.AllocatedAnnotation] == "true" {
 			portName := fmt.Sprintf("node-%s", node.Name)
 			v4IP, v6IP, _, err := c.ipam.GetStaticAddress(portName, portName, node.Annotations[util.IpAddressAnnotation],
@@ -554,6 +559,11 @@ func (c *Controller) initNodeRoutes() error {
 		return err
 	}
 	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
 		nodeIPv4, nodeIPv6 := util.GetNodeInternalIP(*node)
 
 		var v4CIDRs, v6CIDRs []string

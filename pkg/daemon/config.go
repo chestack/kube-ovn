@@ -46,9 +46,9 @@ type Configuration struct {
 	DefaultInterfaceName  string
 
 	// 表示集群节点中未安装 ovn，只能调用 Neutron 相关接口。初始化时从环境变量中配置
-	NoOVN bool
-	ExternalGatewayNS     string
-	ExternalGatewayNet    string
+	NoOVN              bool
+	ExternalGatewayNS  string
+	ExternalGatewayNet string
 }
 
 // ParseFlags will parse cmd args then init kubeClient and configuration
@@ -71,8 +71,9 @@ func ParseFlags() (*Configuration, error) {
 		argsDefaultProviderName  = pflag.String("default-provider-name", "provider", "The vlan or vxlan type default provider interface name")
 		argsDefaultInterfaceName = pflag.String("default-interface-name", "", "The default host interface name in the vlan/vxlan type")
 
-		argExternalGatewayNS     = pflag.String("external-gateway-ns", "secure-container", "The namespace of configmap external-gateway-config, default: secure-container")
-		argExternalGatewayNet    = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
+		argExternalGatewayNS  = pflag.String("external-gateway-ns", "secure-container", "The namespace of configmap external-gateway-config, default: secure-container")
+		argExternalGatewayNet = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
+		argNodeWhiteLabels    = pflag.String("node-white-labels", "secure-container=enabled,kubevirt=enabled", " whichlist nodes which will allocated ip from default logic switch, default: secure-container=enabled,kubevirt=enabled")
 	)
 
 	// mute info log for ipset lib
@@ -96,6 +97,17 @@ func ParseFlags() (*Configuration, error) {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
+	var (
+		labelslist = strings.Split(*argNodeWhiteLabels, ",")
+	)
+
+	for _, ls := range labelslist {
+		kv := strings.Split(ls, "=")
+		if len(kv) != 2 {
+			panic("node-white-labels option is not correct, should be 'k1=v1,k2=v2' ")
+		}
+		util.NodeWhiteLabels[kv[0]] = kv[1]
+	}
 	nodeName := os.Getenv(util.HostnameEnv)
 	if nodeName == "" {
 		klog.Errorf("env KUBE_NODE_NAME not exists")

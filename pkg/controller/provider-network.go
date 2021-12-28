@@ -82,6 +82,11 @@ func (c *Controller) handleUpdateProviderNetwork(key string) error {
 
 	ready := true
 	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
 		if !util.ContainsString(pn.Spec.ExcludeNodes, node.Name) && !util.ContainsString(pn.Status.ReadyNodes, node.Name) {
 			ready = false
 			break
