@@ -298,8 +298,8 @@ func (c *Controller) InitIPAM() error {
 		return err
 	}
 	for _, pod := range pods {
-		// 在 EOS 中，只有符合下面两个条件的 Pod，才走 kube-ovn 来配置网络。不符合的一概忽略
-		if !(neutron.HandledByNeutron(pod.GetAnnotations()) || neutron.HandledByKubeOvnOrigin(pod.GetAnnotations())) {
+		//TODO (fix me) ignore non-ovn pod
+		if !neutron.HandledByKubeOvnOrigin(pod.GetAnnotations()) {
 			continue
 		}
 		if isPodAlive(pod) && pod.Annotations[util.AllocatedAnnotation] == "true" {

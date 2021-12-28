@@ -1290,7 +1290,8 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	defer c.podQueue.ShutDown()
 
 	go wait.Until(ovs.CleanLostInterface, time.Minute, stopCh)
-	go wait.Until(recompute, 10*time.Minute, stopCh)
+	// TODO ovn cloud product not create socker file in hostPath
+	//go wait.Until(recompute, 10*time.Minute, stopCh)
 
 	if ok := cache.WaitForCacheSync(stopCh, c.providerNetworksSynced, c.subnetsSynced, c.podsSynced, c.nodesSynced, c.htbQosSynced); !ok {
 		klog.Fatalf("failed to wait for caches to sync")
