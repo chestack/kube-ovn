@@ -2,7 +2,10 @@ package neutron
 
 const (
 	ECS_HOSTNAME_SUFFIX = ".domain.tld"
-	KUBE_OVN_DEV_OWNER  = "compute:kube-ovn"
+	// device_owner will be parsed by neutron dashboard
+	// dashboard will use device_owner which judged the port is belong to 'secure container' or not
+	// NOTE: neutron dashboard only use 'compute:kuryr' as 'secure container' created
+	KUBE_OVN_DEV_OWNER = "compute:kuryr"
 )
 
 // 在 EOS 上的 Pod中，如果注解包含了:
