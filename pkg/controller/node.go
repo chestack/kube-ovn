@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	goping "github.com/oilbeater/go-ping"
+	//goping "github.com/oilbeater/go-ping"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -620,7 +620,9 @@ func (c *Controller) checkGatewayReady() error {
 				}
 
 				if util.GatewayContains(subnet.Spec.GatewayNode, node.Name) {
-					pinger, err := goping.NewPinger(ip)
+					klog.V(3).Infof("Do not add static route for subnet centralized gateway, because of EAS-93408")
+					//(fix me), do not add static route since EAS-93408
+					/*pinger, err := goping.NewPinger(ip)
 					if err != nil {
 						return fmt.Errorf("failed to init pinger, %v", err)
 					}
@@ -652,13 +654,14 @@ func (c *Controller) checkGatewayReady() error {
 						}
 					} else {
 						klog.V(3).Infof("succeed to ping gw %s", ip)
+
 						if !exist {
 							if err := c.ovnClient.AddStaticRoute(ovs.PolicySrcIP, subnet.Spec.CIDRBlock, ip, c.config.ClusterRouter, util.EcmpRouteType); err != nil {
 								klog.Errorf("failed to add static route for node %s, %v", node.Name, err)
 								return err
 							}
 						}
-					}
+					}*/
 				} else {
 					if exist {
 						klog.Infof("subnet %v gatewayNode does not contains node %v, should delete ecmp route for node ip %s", subnet.Name, node.Name, ip)

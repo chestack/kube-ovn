@@ -926,7 +926,9 @@ func (c *Controller) handleUpdatePod(key string) error {
 
 		if podIP != "" && subnet.Spec.Vlan == "" && subnet.Spec.Vpc == util.DefaultVpc {
 			if pod.Annotations[util.EipAnnotation] != "" || pod.Annotations[util.SnatAnnotation] != "" {
-				cm, err := c.configMapsLister.ConfigMaps(c.config.ExternalGatewayNS).Get(util.ExternalGatewayConfig)
+				klog.Infof("Do not add static route for EIP and SNAT, because of EAS-93408")
+				//(fix me), do not add static route since EAS-93408
+				/*cm, err := c.configMapsLister.ConfigMaps(c.config.ExternalGatewayNS).Get(util.ExternalGatewayConfig)
 				if err != nil {
 					klog.Errorf("failed to get ex-gateway config, %v", err)
 					return err
@@ -944,13 +946,14 @@ func (c *Controller) handleUpdatePod(key string) error {
 				if addr := cm.Data["external-gw-addr"]; addr != "" {
 					nextHop = addr
 				}
-
 				if err := c.ovnClient.AddStaticRoute(ovs.PolicySrcIP, podIP, nextHop, c.config.ClusterRouter, util.NormalRouteType); err != nil {
 					klog.Errorf("failed to add static route, %v", err)
 					return err
-				}
+				}*/
 			} else {
-				if subnet.Spec.GatewayType == kubeovnv1.GWDistributedType && pod.Annotations[util.NorthGatewayAnnotation] == "" {
+				klog.Infof("Do not add static route for pod with distributed gateway, because of EAS-93408")
+				//(fix me), do not add static route since EAS-93408
+				/*if subnet.Spec.GatewayType == kubeovnv1.GWDistributedType && pod.Annotations[util.NorthGatewayAnnotation] == "" {
 					node, err := c.nodesLister.Get(pod.Spec.NodeName)
 					if err != nil {
 						klog.Errorf("get node %s failed %v", pod.Spec.NodeName, err)
@@ -972,7 +975,7 @@ func (c *Controller) handleUpdatePod(key string) error {
 							}
 						}
 					}
-				}
+				}*/
 
 				if pod.Annotations[util.NorthGatewayAnnotation] != "" {
 					if err := c.ovnClient.AddStaticRoute(ovs.PolicySrcIP, podIP, pod.Annotations[util.NorthGatewayAnnotation], c.config.ClusterRouter, util.NormalRouteType); err != nil {

@@ -939,6 +939,7 @@ func (c *Controller) reconcileGateway(subnet *kubeovnv1.Subnet) error {
 	} else {
 		// if gw is distributed remove activateGateway field
 		if subnet.Spec.GatewayType == kubeovnv1.GWDistributedType {
+			//(note), if there is a distributed subnet with gatewayNode
 			if subnet.Spec.GatewayNode == "" {
 				return nil
 			}
@@ -951,7 +952,6 @@ func (c *Controller) reconcileGateway(subnet *kubeovnv1.Subnet) error {
 			if err != nil {
 				return err
 			}
-
 			for _, pod := range pods {
 				if !isPodAlive(pod) || pod.Annotations[util.IpAddressAnnotation] == "" || pod.Annotations[util.LogicalSwitchAnnotation] != subnet.Name {
 					continue
@@ -1001,7 +1001,9 @@ func (c *Controller) reconcileGateway(subnet *kubeovnv1.Subnet) error {
 				return fmt.Errorf("failed to add ecmp static route, no gateway node exists")
 			}
 
-			nodeIPs := make([]string, 0, len(strings.Split(subnet.Spec.GatewayNode, ",")))
+			klog.Infof("Do not add static route for centralized subnet, because of since EAS-93408")
+			//(fix me), do not add static route since EAS-93408
+			/*nodeIPs := make([]string, 0, len(strings.Split(subnet.Spec.GatewayNode, ",")))
 			for _, gw := range strings.Split(subnet.Spec.GatewayNode, ",") {
 				// the format of gatewayNodeStr can be like 'kube-ovn-worker:172.18.0.2, kube-ovn-control-plane:172.18.0.3', which consists of node name and designative egress ip
 				if strings.Contains(gw, ":") {
@@ -1035,7 +1037,7 @@ func (c *Controller) reconcileGateway(subnet *kubeovnv1.Subnet) error {
 						return err
 					}
 				}
-			}
+			}*/
 
 			for _, pod := range pods {
 				if isPodAlive(pod) && pod.Annotations[util.IpAddressAnnotation] != "" && pod.Annotations[util.LogicalSwitchAnnotation] == subnet.Name && pod.Annotations[util.NorthGatewayAnnotation] == "" {
