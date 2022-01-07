@@ -205,7 +205,11 @@ func (config *Configuration) initNicConfig() error {
 		}
 	}
 
-	return setEncapIP(encapIP)
+	// EAS-92489
+	// kube-ovn no need to set external-ids:ovn-encap-ip
+	// return setEncapIP(encapIP)
+	klog.Info("kube-ovn no need to set external-ids:ovn-encap-ip: %v", encapIP)
+	return nil
 }
 
 func findInterface(ifaceStr string) (*net.Interface, error) {
