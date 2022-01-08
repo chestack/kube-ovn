@@ -628,7 +628,35 @@ func (c *Controller) handleAddOrUpdateSubnet(key string) error {
 		}
 		c.patchSubnetStatus(subnet, "ResetLogicalSwitchAclSuccess", "")
 	}
+    //(es-change), add snat rule if subnet natOutgoing is true, because of EAS-93408
+	if subnet.Spec.Vpc == util.DefaultVpc && subnet.Spec.GatewayType == kubeovnv1.GWCentralizedType {
+		// nextHop is "" call UpdateNatRule() to do 'lr-nat-del'
+		nextHop := ""
 
+		// if natoutgoing is true, call UpdateNatRule() to do 'lr-nat-add'
+		if subnet.Spec.NatOutgoing {
+			cm, err := c.configMapsLister.ConfigMaps(c.config.ExternalGatewayNS).Get(util.ExternalGatewayConfig)
+			if err != nil {
+				klog.Errorf("failed to get ex-gateway config, %v", err)
+				return err
+			}
+			nextHop = cm.Data["nic-ip"]
+			if nextHop == "" {
+				klog.Errorf("no available gateway nic address")
+				return fmt.Errorf("no available gateway nic address")
+			}
+			if !strings.Contains(nextHop, "/") {
+				klog.Errorf("gateway nic address's format is invalid")
+				return fmt.Errorf("gateway nic address's format is invalid")
+			}
+			nextHop = strings.Split(nextHop, "/")[0]
+		}
+
+		if err := c.ovnClient.UpdateNatRule("snat", subnet.Spec.CIDRBlock, nextHop, c.config.ClusterRouter, "", ""); err != nil {
+			klog.Errorf("failed to add nat rules for subnet %v, %v", subnet.Name, err)
+			return err
+		}
+	}
 	c.updateVpcStatusQueue.Add(subnet.Spec.Vpc)
 	return nil
 }

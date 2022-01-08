@@ -47,6 +47,7 @@ type Configuration struct {
 	NodeSwitchGateway string
 
 	ServiceClusterIPRange string
+	FlannelPodIPRange     string
 
 	ClusterTcpLoadBalancer        string
 	ClusterUdpLoadBalancer        string
@@ -98,7 +99,8 @@ func ParseFlags() (*Configuration, error) {
 		argNodeSwitchCIDR    = pflag.String("node-switch-cidr", "100.64.0.0/16", "The cidr for node switch")
 		argNodeSwitchGateway = pflag.String("node-switch-gateway", "", "The gateway for node switch (default the first ip in node-switch-cidr)")
 
-		argServiceClusterIPRange = pflag.String("service-cluster-ip-range", "10.96.0.0/12", "The kubernetes service cluster ip range")
+		argServiceClusterIPRange = pflag.String("service-cluster-ip-range", "10.222.0.0/16", "The kubernetes service cluster ip range")
+		argFlannelPodIPRange     = pflag.String("flannel-pod-ip-range", "10.232.0.0/14", "Flannel pod ip range in cluster")
 
 		argClusterTcpLoadBalancer        = pflag.String("cluster-tcp-loadbalancer", "cluster-tcp-loadbalancer", "The name for cluster tcp loadbalancer")
 		argClusterUdpLoadBalancer        = pflag.String("cluster-udp-loadbalancer", "cluster-udp-loadbalancer", "The name for cluster udp loadbalancer")
@@ -169,6 +171,7 @@ func ParseFlags() (*Configuration, error) {
 		NodeSwitchCIDR:                *argNodeSwitchCIDR,
 		NodeSwitchGateway:             *argNodeSwitchGateway,
 		ServiceClusterIPRange:         *argServiceClusterIPRange,
+		FlannelPodIPRange:             *argFlannelPodIPRange,
 		ClusterTcpLoadBalancer:        *argClusterTcpLoadBalancer,
 		ClusterUdpLoadBalancer:        *argClusterUdpLoadBalancer,
 		ClusterTcpSessionLoadBalancer: *argClusterTcpSessionLoadBalancer,

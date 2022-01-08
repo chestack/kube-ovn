@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"reflect"
 	"strings"
 
@@ -22,7 +23,7 @@ var (
 )
 
 func (c *Controller) resyncExternalGateway() {
-	cm, err := c.configMapsLister.ConfigMaps(c.config.PodNamespace).Get(util.ExternalGatewayConfig)
+	cm, err := c.configMapsLister.ConfigMaps(c.config.ExternalGatewayNS).Get(util.ExternalGatewayConfig)
 	if err != nil && !k8serrors.IsNotFound(err) {
 		klog.Errorf("failed to get ovn-external-gw-config, %v", err)
 		return
@@ -160,6 +161,16 @@ func (c *Controller) establishExternalGateway(config map[string]string) error {
 			return fmt.Errorf("no chassisID for external gw %s", gw)
 		}
 		chassises = append(chassises, chassisID)
+
+		// add static route to flannel pod and service, because of EAS-93408
+		if err := c.ovnClient.AddStaticRoute(ovs.PolicySrcIP, c.config.FlannelPodIPRange, node.Annotations[util.IpAddressAnnotation], c.config.ClusterRouter, util.EcmpRouteType); err != nil {
+			klog.Errorf("failed to add static route to flannel pod cidr, %v", err)
+			return err
+		}
+		if err := c.ovnClient.AddStaticRoute(ovs.PolicySrcIP, c.config.ServiceClusterIPRange, node.Annotations[util.IpAddressAnnotation], c.config.ClusterRouter, util.EcmpRouteType); err != nil {
+			klog.Errorf("failed to add static route to cluster service cidr, %v", err)
+			return err
+		}
 	}
 	if len(chassises) == 0 {
 		klog.Error("no available external gw")
@@ -171,5 +182,15 @@ func (c *Controller) establishExternalGateway(config map[string]string) error {
 		return err
 	}
 
+	// add default static route after delete eip/snat src-ip route, because of EAS-93408
+	nextHop := config["external-gw-addr"]
+	if nextHop == "" {
+		klog.Errorf("no available external gateway address")
+		return fmt.Errorf("no available external gateway nic address")
+	}
+	if err := c.ovnClient.AddStaticRoute(ovs.PolicyDstIP,"0.0.0.0/0", nextHop, c.config.ClusterRouter, util.NormalRouteType); err != nil {
+		klog.Errorf("failed to add default static route, %v", err)
+		return err
+	}
 	return nil
 }
