@@ -929,7 +929,6 @@ func (c *Controller) getOtherNodes(protocol string) ([]string, error) {
 		}
 		//TODO skip some node which not in whiteList.
 		if !util.InWhiteList(node) {
-			klog.Infof("node %s is not in whiteList, not handle", node.Name)
 			continue
 		}
 		for _, addr := range node.Status.Addresses {

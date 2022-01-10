@@ -811,6 +811,9 @@ func (c *Controller) checkAndUpdateNodePortGroup() error {
 	}
 
 	for _, node := range nodes {
+		if !util.InWhiteList(node) {
+			continue
+		}
 		// ovn acl doesn't support address_set name with '-', so replace '-' by '.'
 		pgName := strings.Replace(node.Annotations[util.PortNameAnnotation], "-", ".", -1)
 		nodeIP := node.Annotations[util.IpAddressAnnotation]
