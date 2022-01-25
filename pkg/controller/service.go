@@ -216,6 +216,15 @@ func (c *Controller) handleUpdateService(key string) error {
 		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
 		return nil
 	}
+
+	result, nsErr := c.IfHandleNamespace(namespace)
+	if nsErr != nil {
+		return fmt.Errorf("failed to handle the svc %s:  %v", key, nsErr)
+	}
+	if !result {
+		return nil
+	}
+
 	klog.Infof("update svc %s/%s", namespace, name)
 	svc, err := c.servicesLister.Services(namespace).Get(name)
 	if err != nil {
@@ -343,4 +352,14 @@ func parseVipAddr(vipStr string) string {
 		vip = strings.Trim(strings.Split(vipStr, "]")[0], "[]")
 	}
 	return vip
+}
+
+func (c *Controller) IfSharedService(svc string) bool {
+	svcList := strings.Split(c.config.SharedServices, ",")
+	for _, v := range svcList {
+		if svc == v {
+			return true
+		}
+	}
+	return false
 }

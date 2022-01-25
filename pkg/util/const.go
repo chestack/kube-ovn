@@ -157,4 +157,8 @@ const (
 	NetemQosLatencyAnnotationTemplate = "%s.kubernetes.io/latency"
 	NetemQosLimitAnnotationTemplate   = "%s.kubernetes.io/limit"
 	NetemQosLossAnnotationTemplate    = "%s.kubernetes.io/loss"
+
+	NeutronRouterTag  =  "kubernetes-pod"
+	NeutronNetworkNodeLabelKey = "openstack-network-node"
+	NeutronNetworkNodeLabelValue = "enabled"
 )

@@ -1,5 +1,9 @@
 package neutron
 
+import (
+	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
+)
+
 const (
 	ECS_HOSTNAME_SUFFIX = ".domain.tld"
 	// device_owner will be parsed by neutron dashboard
@@ -39,4 +43,15 @@ func HandledByKubeOvnOrigin(as map[string]string) bool {
 func ValidateNeutronConfig(as map[string]string) error {
 	//TODO: TO IMPLEMENT
 	return nil
+}
+
+func IsNeutronRouter(vpc *kubeovnv1.Vpc, neutronRouter bool) bool {
+	if neutronRouter {
+		// vpc.Status.Default for default vpc
+		// vpc.Spec.NeutronRouter for manually created vpc to every network AZ
+		if vpc.Status.Default || vpc.Spec.NeutronRouter != "" {
+			return true
+		}
+	}
+	return false
 }

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"net"
 	"reflect"
 	"strings"
@@ -628,31 +629,17 @@ func (c *Controller) handleAddOrUpdateSubnet(key string) error {
 		}
 		c.patchSubnetStatus(subnet, "ResetLogicalSwitchAclSuccess", "")
 	}
-    //(es-change), add snat rule if subnet natOutgoing is true, because of EAS-93408
-	if subnet.Spec.Vpc == util.DefaultVpc && subnet.Spec.GatewayType == kubeovnv1.GWCentralizedType {
-		// nextHop is "" call UpdateNatRule() to do 'lr-nat-del'
-		nextHop := ""
 
+	//(es-change), add snat rule if subnet natOutgoing is true, because of EAS-93408
+	// UpdateNatRule() do 'lr-nat-del' if nextHop = "" else 'lr-nat-add'
+	if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
+		nextHop := ""
 		// if natoutgoing is true, call UpdateNatRule() to do 'lr-nat-add'
 		if subnet.Spec.NatOutgoing {
-			cm, err := c.configMapsLister.ConfigMaps(c.config.ExternalGatewayNS).Get(util.ExternalGatewayConfig)
-			if err != nil {
-				klog.Errorf("failed to get ex-gateway config, %v", err)
-				return err
-			}
-			nextHop = cm.Data["nic-ip"]
-			if nextHop == "" {
-				klog.Errorf("no available gateway nic address")
-				return fmt.Errorf("no available gateway nic address")
-			}
-			if !strings.Contains(nextHop, "/") {
-				klog.Errorf("gateway nic address's format is invalid")
-				return fmt.Errorf("gateway nic address's format is invalid")
-			}
-			nextHop = strings.Split(nextHop, "/")[0]
+			nextHop = vpc.Spec.ExternalGatewayIP
+			klog.Infof("gateway nic address from neutron %s", nextHop)
 		}
-
-		if err := c.ovnClient.UpdateNatRule("snat", subnet.Spec.CIDRBlock, nextHop, c.config.ClusterRouter, "", ""); err != nil {
+		if err := c.ovnClient.UpdateNatRule("snat", subnet.Spec.CIDRBlock, nextHop, vpc.Status.Router, "", ""); err != nil {
 			klog.Errorf("failed to add nat rules for subnet %v, %v", subnet.Name, err)
 			return err
 		}
@@ -802,7 +789,7 @@ func (c *Controller) handleDeleteSubnet(subnet *kubeovnv1.Subnet) error {
 		}
 	} else {
 		if k8serrors.IsNotFound(err) {
-			if err = c.ovnClient.RemoveRouterPort(subnet.Name, util.DefaultVpc); err != nil {
+			if err = c.ovnClient.RemoveRouterPort(subnet.Name, c.config.ClusterRouter); err != nil {
 				klog.Errorf("failed to delete router port %s %v", subnet.Name, err)
 				return err
 			}

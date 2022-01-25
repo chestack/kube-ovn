@@ -3,11 +3,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -96,8 +97,43 @@ func (c *Controller) handleUpdateEndpoint(key string) error {
 		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
 		return nil
 	}
-	klog.Infof("update endpoint %s/%s", namespace, name)
 
+	if c.IfSharedService(key) {
+		// add shared services rules to all vpcs
+		vpcs, err := c.vpcsLister.List(labels.Everything())
+		if err != nil {
+			klog.Errorf("failed to list vpc to handle service %s, %v", name, err)
+			return err
+		}
+		for _, vpc := range vpcs {
+			if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
+				klog.Infof("update endpoint %s/%s", namespace, name)
+				err = c.updateLoadBalancerRule(namespace, name, vpc.Name)
+				if err != nil {
+					klog.Errorf("failed to add loadbalancer rules of svc %s to vpc %s, %v", name, vpc.Name, err)
+					return err
+				}
+			}
+		}
+	} else {
+		result, nsErr := c.IfHandleNamespace(namespace)
+		if nsErr != nil {
+			return fmt.Errorf("failed to handle the endpoint %s:  %v", key, nsErr)
+		}
+		if !result {
+			return nil
+		}
+		klog.Infof("update endpoint %s/%s", namespace, name)
+		err = c.updateLoadBalancerRule(namespace, name, "")
+		if err != nil {
+			klog.Errorf("failed to add loadbalancer rules of svc %s to no specified vpc, %v", name, err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Controller) updateLoadBalancerRule(namespace string, name string, vpcName string) error {
 	ep, err := c.endpointsLister.Endpoints(namespace).Get(name)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -129,32 +165,34 @@ func (c *Controller) handleUpdateEndpoint(key string) error {
 		return err
 	}
 
-	var vpcName string
-	for _, pod := range pods {
-		if len(pod.Annotations) == 0 {
-			continue
-		}
+	// get vpcName if empty
+	if vpcName == ""{
+		for _, pod := range pods {
+			if len(pod.Annotations) == 0 {
+				continue
+			}
 
-		for _, subset := range ep.Subsets {
-			for _, addr := range subset.Addresses {
-				if addr.IP == pod.Status.PodIP {
-					if vpcName = pod.Annotations[util.LogicalRouterAnnotation]; vpcName != "" {
-						break
+			for _, subset := range ep.Subsets {
+				for _, addr := range subset.Addresses {
+					if addr.IP == pod.Status.PodIP {
+						if vpcName = pod.Annotations[util.LogicalRouterAnnotation]; vpcName != "" {
+							break
+						}
 					}
+				}
+				if vpcName != "" {
+					break
 				}
 			}
 			if vpcName != "" {
 				break
 			}
 		}
-		if vpcName != "" {
-			break
-		}
-	}
 
-	if vpcName == "" {
-		if vpcName = svc.Annotations[util.VpcAnnotation]; vpcName == "" {
-			vpcName = util.DefaultVpc
+		if vpcName == "" {
+			if vpcName = svc.Annotations[util.VpcAnnotation]; vpcName == "" {
+				vpcName = util.DefaultVpc
+			}
 		}
 	}
 
@@ -216,7 +254,6 @@ func (c *Controller) handleUpdateEndpoint(key string) error {
 			}
 		}
 	}
-
 	return nil
 }
 

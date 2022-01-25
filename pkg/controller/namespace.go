@@ -111,6 +111,13 @@ func (c *Controller) processNextAddNamespaceWorkItem() bool {
 }
 
 func (c *Controller) handleAddNamespace(key string) error {
+	result, nsErr := c.IfHandleNamespace(key)
+	if nsErr != nil {
+		return fmt.Errorf("failed to handle the ns %s:  %v", key, nsErr)
+	}
+	if !result {
+		return nil
+	}
 	orinamespace, err := c.namespacesLister.Get(key)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -144,7 +151,7 @@ func (c *Controller) handleAddNamespace(key string) error {
 
 	if ls == "" {
 		// If NS does not belong to any custom VPC, then this NS belongs to the default VPC
-		vpc, err := c.vpcsLister.Get(c.config.ClusterRouter)
+		vpc, err := c.vpcsLister.Get(util.DefaultVpc)
 		if err != nil {
 			klog.Errorf("failed to get default vpc %v", err)
 			return err
@@ -198,3 +205,34 @@ func (c *Controller) handleAddNamespace(key string) error {
 	}
 	return err
 }
+
+func (c *Controller) IfHandleNamespace(namespace string) (bool, error){
+
+	nsList := strings.Split(c.config.NSWhiteList, ",")
+	for _, ns := range nsList {
+		if namespace == ns {
+			return true, nil
+		}
+	}
+
+	nsInfo, err := c.namespacesLister.Get(namespace)
+	if err != nil {
+		return false, nil
+	}
+	labelList := strings.Split(c.config.NSWhiteLabels, ",")
+	for _, ns := range labelList {
+		kv := strings.Split(ns, "=")
+		if len(kv) != 2 {
+			return false, fmt.Errorf("ns-white-labels option is not correct, should be 'k1=v1,k2=v2' ")
+		}
+
+		if v, ok := nsInfo.Labels[kv[0]]; ok {
+			if v == kv[1] {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+

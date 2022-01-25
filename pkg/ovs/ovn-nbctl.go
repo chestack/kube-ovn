@@ -355,7 +355,7 @@ func (c Client) CreateLogicalSwitch(ls, lr, protocol, subnet, gateway string, ex
 	ip := util.GetIpAddrWithMask(gateway, subnet)
 	mac := util.GenerateMac()
 	if needRouter {
-		if err := c.createRouterPort(ls, lr, ip, mac); err != nil {
+		if err := c.CreateRouterPort(ls, lr, ip, mac); err != nil {
 			klog.Errorf("failed to connect switch %s to router, %v", ls, err)
 			return err
 		}
@@ -645,6 +645,12 @@ func (c Client) ListRemoteLogicalSwitchPortAddress() ([]string, error) {
 	return result, nil
 }
 
+// ListNeutronManagedLogicalRouter managed by neutron
+func (c Client) ListNeutronManagedLogicalRouter(routerName string, args ...string) ([]string, error) {
+	args = append(args, fmt.Sprintf("external_ids:neutron\\:router_name=%s", routerName))
+	return c.ListLogicalEntity("logical_router", args...)
+}
+
 // ListLogicalRouter list logical router names
 func (c Client) ListLogicalRouter(needVendorFilter bool, args ...string) ([]string, error) {
 	if needVendorFilter {
@@ -687,7 +693,7 @@ func (c Client) RemoveRouterPort(ls, lr string) error {
 	return nil
 }
 
-func (c Client) createRouterPort(ls, lr, ip, mac string) error {
+func (c Client) CreateRouterPort(ls, lr, ip, mac string) error {
 	klog.Infof("add %s to %s with ip=%s, mac=%s", ls, lr, ip, mac)
 	lsTolr := fmt.Sprintf("%s-%s", ls, lr)
 	lrTols := fmt.Sprintf("%s-%s", lr, ls)
@@ -929,7 +935,7 @@ func (c Client) UpdateNatRule(policy, logicalIP, externalIP, router, logicalMac,
 			return err
 		}
 		_, err := c.ovnNbCommand(IfExists, "lr-nat-del", router, "snat", logicalIP, "--",
-			MayExist, "lr-nat-add", router, policy, externalIP, logicalIP)
+			"lr-nat-add", router, policy, externalIP, logicalIP)
 		return err
 	} else {
 		output, err := c.ovnNbCommand("--format=csv", "--no-heading", "--data=bare", "--columns=external_ip", "find", "NAT", fmt.Sprintf("logical_ip=%s", logicalIP), "type=dnat_and_snat")

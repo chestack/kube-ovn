@@ -537,6 +537,11 @@ func (c *Controller) gcPortGroup() error {
 
 func (c *Controller) gcStaticRoute() error {
 	klog.Infof("start to gc static routes")
+	// do not gc routes on neutron managed router
+	if c.config.NeutronRouter {
+		klog.Infof("do not gc routes on default vpc which is neutron managed router")
+		return nil
+	}
 	routes, err := c.ovnClient.GetStaticRouteList(util.DefaultVpc)
 	if err != nil {
 		klog.Errorf("failed to list static route %v", err)

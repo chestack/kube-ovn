@@ -144,6 +144,15 @@ func (c *Controller) handleUpdateNp(key string) error {
 		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
 		return nil
 	}
+
+	result, nsErr := c.IfHandleNamespace(namespace)
+	if nsErr != nil {
+		return fmt.Errorf("failed to handle the network policy %s:  %v", key, nsErr)
+	}
+	if !result {
+		return nil
+	}
+
 	np, err := c.npsLister.NetworkPolicies(namespace).Get(name)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -766,6 +775,14 @@ func (c *Controller) podMatchNetworkPolicies(pod *corev1.Pod) []string {
 }
 
 func (c *Controller) svcMatchNetworkPolicies(svc *corev1.Service) ([]string, error) {
+	result, nsErr := c.IfHandleNamespace(svc.Namespace)
+	if nsErr != nil {
+		return nil, fmt.Errorf("failed to handle the svc %s:  %v", svc.Name, nsErr)
+	}
+	if !result {
+		return nil, nil
+	}
+
 	// find all match pod
 	pods, err := c.podsLister.Pods(svc.Namespace).List(labels.Everything())
 	if err != nil {

@@ -3,13 +3,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"net"
 	"reflect"
 	"strings"
 
+	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -58,8 +61,7 @@ func (c *Controller) enqueueUpdateVpc(old, new interface{}) {
 	}
 
 	if !newVpc.DeletionTimestamp.IsZero() ||
-		!reflect.DeepEqual(oldVpc.Spec.Namespaces, newVpc.Spec.Namespaces) ||
-		!reflect.DeepEqual(oldVpc.Spec.StaticRoutes, newVpc.Spec.StaticRoutes) ||
+		!reflect.DeepEqual(oldVpc.Spec, newVpc.Spec) ||
 		!reflect.DeepEqual(oldVpc.Annotations, newVpc.Annotations) {
 		klog.V(3).Infof("enqueue update vpc %s", key)
 		c.addOrUpdateVpcQueue.Add(key)
@@ -103,10 +105,23 @@ func (c *Controller) handleDelVpc(vpc *kubeovnv1.Vpc) error {
 	if err := c.deleteVpcLb(vpc); err != nil {
 		return err
 	}
-
-	err := c.deleteVpcRouter(vpc.Status.Router)
-	if err != nil {
-		return err
+	// do not delete neutron managed router in kube-ovn, delete it on neutron page
+	// only delete router created by kube-ovn
+	if !neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
+		// for delete, double check here
+		lrs, err := c.ovnClient.ListLogicalRouter(c.config.EnableExternalVpc)
+		for _, lr := range lrs {
+			if lr == vpc.Status.Router {
+				err = c.deleteVpcRouter(vpc.Status.Router)
+				if err != nil {
+					return err
+				}
+				break
+			}
+		}
+	} else if !vpc.Status.Default {
+		// detach from node switch
+		return c.detachFromNodeSwitch(vpc)
 	}
 	return nil
 }
@@ -265,63 +280,119 @@ func (c *Controller) handleAddOrUpdateVpc(key string) error {
 		klog.Errorf("failed to format vpc: %v", err)
 		return err
 	}
-	if err = c.createVpcRouter(key); err != nil {
+	if err = c.createVpcRouter(vpc, key); err != nil {
 		return err
 	}
 
-	if vpc.Name != util.DefaultVpc {
+	if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
+		if vpc.Spec.NeutronRouter != "" {
+			vpc.Status.Router = fmt.Sprintf("neutron-%s", vpc.Spec.NeutronRouter)
+
+			if !vpc.Status.Default && vpc.Status.NodeSwitchPortIP == "" {
+				klog.Infof("Add join network to %s ", vpc.Name)
+				c.addNodeSwitchToVPC(vpc)
+			}
+		}
+
+		// update subnets outgoing nat rule if vpc externalGatewayIP changed
+		if err = c.updateSubnetOutGoingRule(vpc); err != nil {
+			klog.Errorf("failed to update subnets out going nat rule: %v", err)
+			return err
+		}
+	} else {
+		vpc.Status.Router = key
+	}
+
+	if vpc.Name != util.DefaultVpc || c.config.NeutronRouter {
+		lr := vpc.Status.Router
 		// handle static route
-		existRoute, err := c.ovnClient.GetStaticRouteList(vpc.Name)
+		existRoute, err := c.ovnClient.GetStaticRouteList(lr)
 		if err != nil {
 			klog.Errorf("failed to get vpc %s static route list, %v", vpc.Name, err)
 			return err
 		}
 
-		routeNeedDel, routeNeedAdd, err := diffStaticRoute(existRoute, vpc.Spec.StaticRoutes)
+		staticRoutes := vpc.Spec.StaticRoutes
+		if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
+			// add static route to access kubernetes API
+			neutronStaticRoutes, err := c.getStaticRouteForNeutronVPC(vpc)
+			if err != nil {
+				klog.Errorf("failed to get static route for vpc %s: %v", vpc.Name, err)
+				return err
+			}
+			staticRoutes = append(staticRoutes, neutronStaticRoutes...)
+			for i, route := range existRoute {
+				if route.CIDR == "0.0.0.0/0" {
+					// keep default route rule from neutron router
+					// remove it from existRoute
+					existRoute[i] = existRoute[len(existRoute)-1]
+					existRoute = existRoute[:len(existRoute)-1]
+					break
+				}
+			}
+		}
+
+		routeNeedDel, routeNeedAdd, err := diffStaticRoute(existRoute, staticRoutes)
 		if err != nil {
 			klog.Errorf("failed to diff vpc %s static route, %v", vpc.Name, err)
 			return err
 		}
 		for _, item := range routeNeedDel {
-			if err = c.ovnClient.DeleteStaticRoute(item.CIDR, vpc.Name); err != nil {
+			if err = c.ovnClient.DeleteStaticRoute(item.CIDR, lr); err != nil {
 				klog.Errorf("del vpc %s static route failed, %v", vpc.Name, err)
 				return err
 			}
 		}
 
 		for _, item := range routeNeedAdd {
-			if err = c.ovnClient.AddStaticRoute(convertPolicy(item.Policy), item.CIDR, item.NextHopIP, vpc.Name, util.NormalRouteType); err != nil {
+			routeType := util.NormalRouteType
+			if item.CIDR == c.config.DNSServiceIP {
+				routeType = util.EcmpRouteType
+			}
+			if err = c.ovnClient.AddStaticRoute(convertPolicy(item.Policy), item.CIDR, item.NextHopIP, lr, routeType); err != nil {
 				klog.Errorf("add static route to vpc %s failed, %v", vpc.Name, err)
 				return err
 			}
 		}
 		// handle policy route
-		existPolicyRoute, err := c.ovnClient.GetPolicyRouteList(vpc.Name)
-		if err != nil {
-			klog.Errorf("failed to get vpc %s policy route list, %v", vpc.Name, err)
-			return err
-		}
-
-		policyRouteNeedDel, policyRouteNeedAdd, err := diffPolicyRoute(existPolicyRoute, vpc.Spec.PolicyRoutes)
-		if err != nil {
-			klog.Errorf("failed to diff vpc %s policy route, %v", vpc.Name, err)
-			return err
-		}
-		for _, item := range policyRouteNeedDel {
-			if err = c.ovnClient.DeletePolicyRoute(vpc.Name, item.Priority, item.Match); err != nil {
-				klog.Errorf("del vpc %s policy route failed, %v", vpc.Name, err)
+		if vpc.Name != util.DefaultVpc {
+			existPolicyRoute, err := c.ovnClient.GetPolicyRouteList(lr)
+			if err != nil {
+				klog.Errorf("failed to get vpc %s policy route list, %v", vpc.Name, err)
 				return err
 			}
-		}
-		for _, item := range policyRouteNeedAdd {
-			if err = c.ovnClient.AddPolicyRoute(vpc.Name, item.Priority, item.Match, string(item.Action), item.NextHopIP); err != nil {
-				klog.Errorf("add policy route to vpc %s failed, %v", vpc.Name, err)
+
+			policyRoutes := vpc.Spec.PolicyRoutes
+			if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
+				// add policy route to access kubernetes API
+				neutronPolicyRoutes, err := c.getPolicyRoutesForNeutronVPC(vpc)
+				if err != nil {
+					klog.Errorf("failed to get policy route for vpc %s: %v", vpc.Name, err)
+					return err
+				}
+				policyRoutes = append(policyRoutes, neutronPolicyRoutes...)
+			}
+
+			policyRouteNeedDel, policyRouteNeedAdd, err := diffPolicyRoute(existPolicyRoute, policyRoutes)
+			if err != nil {
+				klog.Errorf("failed to diff vpc %s policy route, %v", vpc.Name, err)
 				return err
+			}
+			for _, item := range policyRouteNeedDel {
+				if err = c.ovnClient.DeletePolicyRoute(lr, item.Priority, item.Match); err != nil {
+					klog.Errorf("del vpc %s policy route failed, %v", vpc.Name, err)
+					return err
+				}
+			}
+			for _, item := range policyRouteNeedAdd {
+				if err = c.ovnClient.AddPolicyRoute(lr, item.Priority, item.Match, string(item.Action), item.NextHopIP); err != nil {
+					klog.Errorf("add policy route to vpc %s failed, %v", vpc.Name, err)
+					return err
+				}
 			}
 		}
 	}
 
-	vpc.Status.Router = key
 	vpc.Status.Standby = true
 	if c.config.EnableLb {
 		vpcLb, err := c.addLoadBalancer(key)
@@ -337,9 +408,17 @@ func (c *Controller) handleAddOrUpdateVpc(key string) error {
 	if err != nil {
 		return err
 	}
+	klog.Infof("VPC Status Router is %v", vpc.Status.Router)
 	vpc, err = c.config.KubeOvnClient.KubeovnV1().Vpcs().Patch(context.Background(), vpc.Name, types.MergePatchType, bytes, metav1.PatchOptions{}, "status")
 	if err != nil {
 		return err
+	}
+
+	if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) && !vpc.Status.Default {
+		if err = c.addLBRulesToVPC(vpc); err != nil {
+			klog.Errorf("failed to add lb rule to vpc %s: %v", vpc.Name, err)
+			return err
+		}
 	}
 
 	if len(vpc.Annotations) != 0 && strings.ToLower(vpc.Annotations[util.VpcLbAnnotation]) == "on" {
@@ -609,21 +688,220 @@ func (c *Controller) getVpcSubnets(vpc *kubeovnv1.Vpc) (subnets []string, defaul
 }
 
 // createVpcRouter create router to connect logical switches in vpc
-func (c *Controller) createVpcRouter(lr string) error {
-	lrs, err := c.ovnClient.ListLogicalRouter(c.config.EnableExternalVpc)
-	if err != nil {
-		return err
-	}
-	klog.Infof("exists routers %v", lrs)
-	for _, r := range lrs {
-		if lr == r {
-			return nil
+func (c *Controller) createVpcRouter(vpc *kubeovnv1.Vpc, lr string) error {
+	if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
+		klog.Infof("%s is neutron managed vpc, do nothing here", vpc.Name)
+	} else {
+		lrs, err := c.ovnClient.ListLogicalRouter(c.config.EnableExternalVpc)
+		if err != nil {
+			return err
 		}
+		klog.Infof("exists routers %v", lrs)
+		for _, r := range lrs {
+			if lr == r {
+				return nil
+			}
+		}
+		return c.ovnClient.CreateLogicalRouter(lr)
 	}
-	return c.ovnClient.CreateLogicalRouter(lr)
+	return nil
 }
 
 // deleteVpcRouter delete router to connect logical switches in vpc
 func (c *Controller) deleteVpcRouter(lr string) error {
 	return c.ovnClient.DeleteLogicalRouter(lr)
+}
+
+func (c *Controller) addNodeSwitchToVPC(vpc *kubeovnv1.Vpc) error {
+	// allocate address
+	portName := fmt.Sprintf("%s-%s", vpc.Name, c.config.NodeSwitch)
+	v4IP, _, mac, err := c.ipam.GetRandomAddress(portName, portName, "", c.config.NodeSwitch, nil)
+	if err != nil {
+		klog.Errorf("failed to alloc ip address for vpc %s node switch : %v", vpc.Name, err)
+		return err
+	}
+	subnet, err := c.subnetsLister.Get(c.config.NodeSwitch)
+	if err != nil {
+		klog.Errorf("failed to get subnet %s: %+v", subnet, err)
+		return err
+	}
+	ip := util.GetIpAddrWithMask(v4IP, subnet.Spec.CIDRBlock)
+
+	// create router port
+	err = c.ovnClient.CreateRouterPort(c.config.NodeSwitch, vpc.Status.Router, ip, mac)
+	if err != nil {
+		klog.Errorf("failed to connect switch %s to vpc %s, %v", c.config.NodeSwitch, vpc.Name, err)
+		return err
+	}
+
+	// create ip CR to reserve this ip address
+	if err := c.createOrUpdateCrdIPs(portName, v4IP, mac); err != nil {
+		klog.Errorf("failed to create or update IPs node-%s: %v", portName, err)
+		return err
+	}
+
+	// update vpc status
+	klog.Infof("Update vpc %s, add NodeGatewayIP %s", vpc.Name, ip)
+	vpc.Status.NodeSwitchPortIP = v4IP
+	return nil
+}
+
+func (c *Controller) detachFromNodeSwitch(vpc *kubeovnv1.Vpc) error {
+	// delete lrp port and lsp
+	if err := c.ovnClient.RemoveRouterPort(c.config.NodeSwitch, vpc.Status.Router); err != nil {
+		klog.Errorf("failed to remove router port from %s, %v", c.config.NodeSwitch, err)
+		return err
+	}
+
+	// delete ip CR
+	ipName := fmt.Sprintf("node-%s-%s", vpc.Name, c.config.NodeSwitch)
+	if err := c.config.KubeOvnClient.KubeovnV1().IPs().Delete(context.Background(), ipName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Controller) addLBRulesToVPC(vpc *kubeovnv1.Vpc) error {
+	for _, svc := range strings.Split(c.config.SharedServices, ",") {
+		namespace, name, err := cache.SplitMetaNamespaceKey(svc)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", svc))
+			return nil
+		}
+		// add services rules to vpc LB
+		err = c.updateLoadBalancerRule(namespace, name, vpc.Name)
+		if err != nil {
+			klog.Errorf("failed to add loadbalancer rules of svc %s to vpc %s, %v", name, vpc.Name, err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Controller) getPolicyRoutesForNeutronVPC(vpc *kubeovnv1.Vpc) ([]*kubeovnv1.PolicyRoute, error) {
+	// to be added routes
+	nodes, err := c.getNeutronVPCGatewayNodes(vpc)
+	if err != nil {
+		klog.Errorf("failed to get nodes: %v", err)
+		return nil, err
+	}
+	routeList := make([]*kubeovnv1.PolicyRoute, 0)
+	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
+		nodeIPv4, _ := util.GetNodeInternalIP(*node)
+		joinAddrV4, _ := util.SplitStringIP(node.Annotations[util.IpAddressAnnotation])
+
+		routeList = append(routeList, &kubeovnv1.PolicyRoute{
+			Priority:  util.NodeRouterPolicyPriority,
+			Match:     fmt.Sprintf("ip%d.dst == %s", 4, nodeIPv4),
+			Action:    "reroute",
+			NextHopIP: joinAddrV4,
+		})
+	}
+	return routeList, nil
+}
+
+func (c *Controller) getStaticRouteForNeutronVPC(vpc *kubeovnv1.Vpc) ([]*kubeovnv1.StaticRoute, error) {
+	// to be added routes
+	nodes, err := c.getNeutronVPCGatewayNodes(vpc)
+	if err != nil {
+		klog.Errorf("failed to get nodes: %v", err)
+		return nil, err
+	}
+	routeList := make([]*kubeovnv1.StaticRoute, 0)
+	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
+		joinAddrV4, _ := util.SplitStringIP(node.Annotations[util.IpAddressAnnotation])
+		routeList = append(routeList, &kubeovnv1.StaticRoute{
+			Policy:    kubeovnv1.PolicyDst,
+			CIDR:      c.config.DNSServiceIP,
+			NextHopIP: joinAddrV4,
+		})
+	}
+	return routeList, nil
+}
+
+func (c *Controller) getNeutronVPCGatewayNodes(vpc *kubeovnv1.Vpc) (ret []*v1.Node, err error) {
+	if vpc.Spec.GatewayNode != "" {
+		customNodes := make([]*v1.Node, 0)
+		for _, gw := range strings.Split(vpc.Spec.GatewayNode, ",") {
+			node, nerr := c.nodesLister.Get(gw)
+			if nerr != nil {
+				klog.Errorf("failed to get node %s: %v", gw, nerr)
+				return nil, nerr
+			}
+			customNodes = append(customNodes, node)
+		}
+		return customNodes, nil
+	}
+
+	// use nodes labeled NeutronNetworkNodeLabel are gateway nodes in kube-ovn
+	selector := labels.NewSelector()
+	tagReq, _ := labels.NewRequirement(util.NeutronNetworkNodeLabelKey, selection.Equals, []string{util.NeutronNetworkNodeLabelValue})
+	selector = selector.Add(*tagReq)
+
+	nodes, err := c.nodesLister.List(selector)
+	if err != nil {
+		klog.Errorf("failed to list nodes, %v", err)
+		return nil, err
+	}
+
+	gwNodes := make([]*v1.Node, 0, len(nodes))
+	for _, node := range nodes {
+		//TODO skip some node which not in whiteList.
+		if !util.InWhiteList(node) {
+			klog.Infof("node %s is not in whiteList, not handle", node.Name)
+			continue
+		}
+		gwNodes = append(gwNodes, node)
+	}
+	return gwNodes, nil
+}
+
+func (c *Controller) updateSubnetOutGoingRule(vpc *kubeovnv1.Vpc) error {
+	for _, subnet := range vpc.Status.Subnets {
+		cachedSubnet, err := c.subnetsLister.Get(subnet)
+		if err != nil {
+			return err
+		}
+
+		nextHop := ""
+		// if natoutgoing is true, call UpdateNatRule() to do 'lr-nat-add'
+		if cachedSubnet.Spec.NatOutgoing {
+			nextHop = vpc.Spec.ExternalGatewayIP
+			klog.Infof("Gateway ip address of vpc %s for subnet %s is %s", vpc.Name, cachedSubnet.Name, nextHop)
+		}
+		if err := c.ovnClient.UpdateNatRule("snat", cachedSubnet.Spec.CIDRBlock, nextHop, vpc.Status.Router, "", ""); err != nil {
+			klog.Errorf("failed to add nat rules for subnet %v, %v", cachedSubnet.Name, err)
+			return err
+		}
+	}
+	return nil
+}
+
+// InitRouteToFlannelPods
+func (c *Controller) initRouteToFlannelPods(vpc *kubeovnv1.Vpc) error {
+	nodes, err := c.getNeutronVPCGatewayNodes(vpc)
+	if err != nil {
+		klog.Errorf("failed to get nodes: %v", err)
+		return err
+	}
+
+	for _, node := range nodes {
+		// add static route to flannel pod and service, because of EAS-93408
+		if err = c.ovnClient.AddStaticRoute(ovs.PolicyDstIP, c.config.FlannelPodIPRange, node.Annotations[util.IpAddressAnnotation], c.config.ClusterRouter, util.EcmpRouteType); err != nil {
+			klog.Errorf("failed to add static route to flannel pod cidr, %v", err)
+			return err
+		}
+	}
+	return nil
 }

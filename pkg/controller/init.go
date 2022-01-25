@@ -18,6 +18,73 @@ import (
 	"github.com/kubeovn/kube-ovn/pkg/util"
 )
 
+func (c *Controller) InitNeutronRouter() error {
+	// if cluster default router managed by neutron
+	if c.config.NeutronRouter {
+		// neutron router has a random uuid name, so it need to list logical router to get neutron router
+		lr, err := c.getNeutronManagedLogicalRouter()
+		if err != nil {
+			return err
+		}
+		var routerId string
+		// no router created yet
+		if lr == "" {
+			// call neutron to create cluster router
+			routerId, err = c.neutronController.ntrnCli.CreateRouter(c.config.ClusterRouter, c.config.NeutronDefaultExternalNet)
+			if err != nil {
+				klog.Errorf("init cluster router failed to call neutron to create router: %v", err)
+				return err
+			}
+			klog.Infof("Create neutron router %s for default vpc", routerId)
+			lr = fmt.Sprintf("neutron-%s", routerId)
+		} else {
+			router := strings.SplitAfter(lr, "neutron-")
+			routerId, err = c.neutronController.ntrnCli.GetRouter(router[1])
+			if err != nil {
+				klog.Errorf("failed to get router %s, because %v", routerId, err)
+				return err
+			}
+		}
+
+		err = c.updateDefaultVPCConfig(lr)
+		if err != nil {
+			klog.Errorf("failed to update default vpc config: %v", err)
+			return err
+		}
+		return err
+	}
+	return nil
+}
+
+// GetNeutronManagedLogicalRouter
+func (c *Controller) getNeutronManagedLogicalRouter() (string, error) {
+	lrs, err := c.ovnClient.ListNeutronManagedLogicalRouter(c.config.ClusterRouter)
+	if err != nil {
+		klog.Infof("failed to get neutron managed router %v", err)
+		return "", err
+	}
+	if len(lrs) > 1 {
+		return "", fmt.Errorf("there are more than one router %v has been created", lrs)
+	}
+	if len(lrs) == 0 {
+		klog.Infof("Neutron router has not been created")
+		return "", nil
+	}
+	klog.Infof("Get neutron managed router %v", lrs[0])
+	return lrs[0], nil
+}
+
+// UpdateDefaultVPC update vpc router status
+func (c *Controller) updateDefaultVPCConfig(lr string) error {
+	klog.Infof("Neutron router enabled, update VPC, lr is: %s", lr)
+	// update cluster router name in ovnclient
+	// update ClusterRouter name in controller config
+	// it's necessary for all ovn cmd execution
+	c.ovnClient.ClusterRouter = lr
+	c.config.ClusterRouter = lr
+	return nil
+}
+
 func (c *Controller) InitOVN() error {
 	if err := c.initClusterRouter(); err != nil {
 		klog.Errorf("init cluster router failed: %v", err)
@@ -81,6 +148,7 @@ func (c *Controller) InitDefaultVpc() error {
 	if err != nil {
 		return err
 	}
+	klog.Infof("Init VPC router name is: %s", vpc.Status.Router)
 	_, err = c.config.KubeOvnClient.KubeovnV1().Vpcs().Patch(context.Background(), vpc.Name, types.MergePatchType, bytes, metav1.PatchOptions{}, "status")
 	if err != nil {
 		klog.Errorf("init default vpc failed: %v", err)
@@ -179,17 +247,21 @@ func (c *Controller) initNodeSwitch() error {
 
 // InitClusterRouter init cluster router to connect different logical switches
 func (c *Controller) initClusterRouter() error {
-	lrs, err := c.ovnClient.ListLogicalRouter(c.config.EnableExternalVpc)
-	if err != nil {
-		return err
-	}
-	klog.Infof("exists routers: %v", lrs)
-	for _, r := range lrs {
-		if c.config.ClusterRouter == r {
-			return nil
+	// if cluster router managed by neutron
+	if !c.config.NeutronRouter {
+		lrs, err := c.ovnClient.ListLogicalRouter(c.config.EnableExternalVpc)
+		if err != nil {
+			return err
 		}
+		klog.Infof("exists routers: %v", lrs)
+		for _, r := range lrs {
+			if c.config.ClusterRouter == r {
+				return nil
+			}
+		}
+		return c.ovnClient.CreateLogicalRouter(c.config.ClusterRouter)
 	}
-	return c.ovnClient.CreateLogicalRouter(c.config.ClusterRouter)
+	return nil
 }
 
 // InitLoadBalancer init the default tcp and udp cluster loadbalancer

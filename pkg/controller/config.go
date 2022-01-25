@@ -76,6 +76,12 @@ type Configuration struct {
 	ExternalGatewayNS     string
 	ExternalGatewayNet    string
 	ExternalGatewayVlanID int
+	NeutronRouter         bool
+	NeutronDefaultExternalNet    string
+	NSWhiteLabels         string
+	NSWhiteList           string
+	SharedServices        string
+	DNSServiceIP          string
 }
 
 // ParseFlags parses cmd args then init kubeclient and conf
@@ -101,6 +107,7 @@ func ParseFlags() (*Configuration, error) {
 
 		argServiceClusterIPRange = pflag.String("service-cluster-ip-range", "10.222.0.0/16", "The kubernetes service cluster ip range")
 		argFlannelPodIPRange     = pflag.String("flannel-pod-ip-range", "10.232.0.0/14", "Flannel pod ip range in cluster")
+		argDNSServiceIP          = pflag.String("dns-service-ip", "10.222.0.3/32", "ClusterIP of coredns svc")
 
 		argClusterTcpLoadBalancer        = pflag.String("cluster-tcp-loadbalancer", "cluster-tcp-loadbalancer", "The name for cluster tcp loadbalancer")
 		argClusterUdpLoadBalancer        = pflag.String("cluster-udp-loadbalancer", "cluster-udp-loadbalancer", "The name for cluster udp loadbalancer")
@@ -124,6 +131,11 @@ func ParseFlags() (*Configuration, error) {
 		argExternalGatewayNet    = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
 		argExternalGatewayVlanID = pflag.Int("external-gateway-vlanid", 0, "The vlanId of port ln-ovn-external, default: 0")
 		argNodeWhiteLabels       = pflag.String("node-white-labels", "secure-container=enabled,kubevirt=enabled", " whichlist nodes which will allocated ip from default logic switch, default: secure-container=enabled,kubevirt=enabled")
+		argNeutronRouter         = pflag.Bool("neutron-router", true, "init cluster by calling neutron API, default: true")
+		argDefaultNeutronExternalNet  = pflag.String("default-neutron-external-net", "", "Do not set external gateway if it's empty")
+		argNSWhiteLabels         = pflag.String("ns-white-labels", "ecnf-workload-ns=true,ecnf-reserved-ns=true", "only deal with svc and ep of ns with this label, default: ecnf-workload-ns=true")
+		argNSWhiteList           = pflag.String("ns-white-list", "", "deal with svc and ep of ns in this list")
+		argSharedServices        = pflag.String("shared-services", "default/kubernetes", "shared svc to add loadbalancer rulee to all vpcs")
 	)
 
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
@@ -192,6 +204,12 @@ func ParseFlags() (*Configuration, error) {
 		ExternalGatewayNS:             *argExternalGatewayNS,
 		ExternalGatewayNet:            *argExternalGatewayNet,
 		ExternalGatewayVlanID:         *argExternalGatewayVlanID,
+		NeutronRouter:                 *argNeutronRouter,
+		NeutronDefaultExternalNet:     *argDefaultNeutronExternalNet,
+		NSWhiteLabels:                 *argNSWhiteLabels,
+		NSWhiteList:                   *argNSWhiteList,
+		SharedServices:                *argSharedServices,
+		DNSServiceIP:                  *argDNSServiceIP,
 	}
 
 	if config.NetworkType == util.NetworkTypeVlan && config.DefaultHostInterface == "" {

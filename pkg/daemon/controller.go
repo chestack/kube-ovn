@@ -51,6 +51,9 @@ type Controller struct {
 	addOrUpdateProviderNetworkQueue workqueue.RateLimitingInterface
 	deleteProviderNetworkQueue      workqueue.RateLimitingInterface
 
+	vpcsLister  kubeovnlister.VpcLister
+	vpcsSynced   cache.InformerSynced
+
 	subnetsLister kubeovnlister.SubnetLister
 	subnetsSynced cache.InformerSynced
 	subnetQueue   workqueue.RateLimitingInterface
@@ -85,6 +88,7 @@ func NewController(config *Configuration, podInformerFactory informers.SharedInf
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: config.NodeName})
 
 	providerNetworkInformer := kubeovnInformerFactory.Kubeovn().V1().ProviderNetworks()
+	vpcInformer := kubeovnInformerFactory.Kubeovn().V1().Vpcs()
 	subnetInformer := kubeovnInformerFactory.Kubeovn().V1().Subnets()
 	podInformer := podInformerFactory.Core().V1().Pods()
 	nodeInformer := nodeInformerFactory.Core().V1().Nodes()
@@ -97,6 +101,9 @@ func NewController(config *Configuration, podInformerFactory informers.SharedInf
 		providerNetworksSynced:          providerNetworkInformer.Informer().HasSynced,
 		addOrUpdateProviderNetworkQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "AddOrUpdateProviderNetwork"),
 		deleteProviderNetworkQueue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "DeleteProviderNetwork"),
+
+		vpcsLister:  vpcInformer.Lister(),
+		vpcsSynced:   vpcInformer.Informer().HasSynced,
 
 		subnetsLister: subnetInformer.Lister(),
 		subnetsSynced: subnetInformer.Informer().HasSynced,
@@ -645,44 +652,67 @@ func (c *Controller) reconcileRouters(event subnetEvent) error {
 			return err
 		}
 	}
+	// cidrGatwayMap is to records routes info for all neutron vpcs
+	// it looks like {'10.16.0.0/16': '100.64.0.1', '192.168.0.0/16': '100.64.0.2'}
+	cidrGatwayMap := map[string]string{}
+	node, err := c.nodesLister.Get(c.config.NodeName)
+	if err != nil {
+		klog.Errorf("failed to get node %s %v", c.config.NodeName, err)
+		return err
+	}
+	defaultGateway, ok := node.Annotations[util.GatewayAnnotation]
+	if !ok {
+		klog.Errorf("annotation for node %s ovn.kubernetes.io/gateway not exists", node.Name)
+		return fmt.Errorf("annotation for node ovn.kubernetes.io/gateway not exists")
+	}
 
-	cidrs := make([]string, 0, len(subnets)*2)
 	for _, subnet := range subnets {
-		if subnet.Spec.Vlan != "" || subnet.Spec.Vpc != util.DefaultVpc || !subnet.Status.IsReady() {
+		if subnet.Spec.Vlan != "" || !subnet.Status.IsReady() {
 			continue
+		}
+		gateway := defaultGateway
+		// reconcile routes for subnets of neutron vpc and skip append cidrs
+		if subnet.Spec.Vpc != util.DefaultVpc {
+			vpc, vpcErr := c.vpcsLister.Get(subnet.Spec.Vpc)
+			if vpcErr != nil {
+				klog.Errorf("failed to get subnet's vpc '%s', %v", subnet.Spec.Vpc, vpcErr)
+				return vpcErr
+			}
+			// not neutron managed vpc
+			if vpc.Spec.NeutronRouter == ""{
+				continue
+			}
+
+			if vpc.Status.NodeSwitchPortIP == "" {
+				return fmt.Errorf("node gateway ip is empty, re-enqueue")
+			}
+			gateway = vpc.Status.NodeSwitchPortIP
 		}
 
 		for _, cidrBlock := range strings.Split(subnet.Spec.CIDRBlock, ",") {
 			if _, ipNet, err := net.ParseCIDR(cidrBlock); err != nil {
 				klog.Errorf("%s is not a valid cidr block", cidrBlock)
 			} else {
-				cidrs = append(cidrs, ipNet.String())
+				cidrGatwayMap[ipNet.String()] = gateway
 			}
 		}
 	}
+	return reconcileStaticRoutes(defaultGateway, cidrGatwayMap)
+}
 
-	node, err := c.nodesLister.Get(c.config.NodeName)
-	if err != nil {
-		klog.Errorf("failed to get node %s %v", c.config.NodeName, err)
-		return err
-	}
-	gateway, ok := node.Annotations[util.GatewayAnnotation]
-	if !ok {
-		klog.Errorf("annotation for node %s ovn.kubernetes.io/gateway not exists", node.Name)
-		return fmt.Errorf("annotation for node ovn.kubernetes.io/gateway not exists")
-	}
+func reconcileStaticRoutes(defaultGateway string, cidrGatwayMap map[string]string) error {
 	nic, err := netlink.LinkByName(util.NodeNic)
 	if err != nil {
 		klog.Errorf("failed to get nic %s", util.NodeNic)
 		return fmt.Errorf("failed to get nic %s", util.NodeNic)
 	}
 
-	existRoutes, err := getNicExistRoutes(nic, gateway)
+	existRoutes, err := getNicExistRoutes(nic, defaultGateway)
 	if err != nil {
 		return err
 	}
 
-	toAdd, toDel := routeDiff(existRoutes, cidrs)
+	toAdd, toDel := routeDiff(existRoutes, cidrGatwayMap)
 	for _, r := range toDel {
 		_, cidr, _ := net.ParseCIDR(r)
 		if err = netlink.RouteDel(&netlink.Route{Dst: cidr}); err != nil {
@@ -690,7 +720,7 @@ func (c *Controller) reconcileRouters(event subnetEvent) error {
 		}
 	}
 
-	for _, r := range toAdd {
+	for r, gateway := range toAdd {
 		_, cidr, _ := net.ParseCIDR(r)
 		for _, gw := range strings.Split(gateway, ",") {
 			if util.CheckProtocol(gw) != util.CheckProtocol(r) {
@@ -721,15 +751,15 @@ func getNicExistRoutes(nic netlink.Link, gateway string) ([]netlink.Route, error
 	return existRoutes, nil
 }
 
-func routeDiff(existRoutes []netlink.Route, cidrs []string) (toAdd []string, toDel []string) {
+func routeDiff(existRoutes []netlink.Route, cidrGatwayMap map[string]string) (toAdd map[string]string, toDel []string) {
 	for _, route := range existRoutes {
 		if route.Scope == netlink.SCOPE_LINK {
 			continue
 		}
 
 		found := false
-		for _, c := range cidrs {
-			if route.Dst.String() == c {
+		for cidr, _ := range cidrGatwayMap {
+			if route.Dst.String() == cidr {
 				found = true
 				break
 			}
@@ -742,16 +772,17 @@ func routeDiff(existRoutes []netlink.Route, cidrs []string) (toAdd []string, toD
 		klog.Infof("route to del %v", toDel)
 	}
 
-	for _, c := range cidrs {
+	toAdd = map[string]string{}
+	for cidr, gateway := range cidrGatwayMap {
 		found := false
 		for _, r := range existRoutes {
-			if r.Dst.String() == c {
+			if r.Dst.String() == cidr {
 				found = true
 				break
 			}
 		}
 		if !found {
-			toAdd = append(toAdd, c)
+			toAdd[cidr] = gateway
 		}
 	}
 	if len(toAdd) > 0 {
@@ -1293,7 +1324,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	// TODO ovn cloud product not create socker file in hostPath
 	//go wait.Until(recompute, 10*time.Minute, stopCh)
 
-	if ok := cache.WaitForCacheSync(stopCh, c.providerNetworksSynced, c.subnetsSynced, c.podsSynced, c.nodesSynced, c.htbQosSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.providerNetworksSynced, c.vpcsSynced, c.subnetsSynced, c.podsSynced, c.nodesSynced, c.htbQosSynced); !ok {
 		klog.Fatalf("failed to wait for caches to sync")
 		return
 	}

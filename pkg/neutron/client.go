@@ -3,8 +3,8 @@ package neutron
 import (
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
-
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -47,24 +47,35 @@ func NewClientset(kubeconfig *rest.Config) clientset.Interface {
 
 type Client struct {
 	networkCliV2 *gophercloud.ServiceClient
+	identityCliV3 *gophercloud.ServiceClient
 
 	podsDeleteLock *sync.Mutex
 	portIDs        map[string]string
 }
 
 func NewClient() *Client {
-	provider := newProviderClientOrDie()
+	provider := newProviderClientOrDie(false)
+	domainTokenProvider := newProviderClientOrDie(true)
 	return &Client{
 		networkCliV2:   newNetworkV2ClientOrDie(provider),
+		identityCliV3:  newIdentityV3ClientOrDie(domainTokenProvider),
 		podsDeleteLock: &sync.Mutex{},
 		portIDs:        make(map[string]string),
 	}
 }
 
-func newProviderClientOrDie() *gophercloud.ProviderClient {
+func newProviderClientOrDie(domainScope bool) *gophercloud.ProviderClient {
 	opt, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
 		klog.Fatalf("openstack auth options from environment error: %v", err)
+	}
+	// with OS_PROJECT_NAME in env, AuthOptionsFromEnv return project scope token
+	// which can not list projects, we need a domain scope token here
+	if domainScope {
+		opt.TenantName = ""
+		opt.Scope = &gophercloud.AuthScope{
+			DomainName:  os.Getenv("OS_DOMAIN_NAME"),
+		}
 	}
 	p, err := openstack.AuthenticatedClient(opt)
 	if err != nil {
@@ -89,6 +100,14 @@ func newNetworkV2ClientOrDie(p *gophercloud.ProviderClient) *gophercloud.Service
 	cli, err := openstack.NewNetworkV2(p, gophercloud.EndpointOpts{})
 	if err != nil {
 		klog.Fatalf("new NetworkV2Client error : %v", err)
+	}
+	return cli
+}
+
+func newIdentityV3ClientOrDie(p *gophercloud.ProviderClient) *gophercloud.ServiceClient {
+	cli, err := openstack.NewIdentityV3(p, gophercloud.EndpointOpts{})
+	if err != nil {
+		klog.Fatalf("new NewIdentityV3 error : %v", err)
 	}
 	return cli
 }

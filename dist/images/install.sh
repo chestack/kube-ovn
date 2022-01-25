@@ -277,6 +277,16 @@ spec:
           properties:
             spec:
               properties:
+                neutronRouter:
+                  type: string
+                availabilityZone:
+                  type: string
+                externalNetwork:
+                  type: string
+                externalGatewayIp:
+                  type: string
+                gatewayNode:
+                  type: string
                 namespaces:
                   items:
                     type: string
@@ -308,6 +318,8 @@ spec:
               type: object
             status:
               properties:
+                nodeSwitchPortIP:
+                  type: string
                 conditions:
                   items:
                     properties:

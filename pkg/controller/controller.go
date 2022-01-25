@@ -381,6 +381,11 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 		klog.Fatalf("failed to set NB_Global option use_ct_inv_match to false: %v", err)
 	}
 
+	// init neutron router and update vpc config: vpc.status.router and logical router name
+	if err := c.InitNeutronRouter(); err != nil {
+		klog.Fatalf("failed to init ovn resource: %v", err)
+	}
+
 	if err := c.InitDefaultVpc(); err != nil {
 		klog.Fatalf("failed to init default vpc: %v", err)
 	}
@@ -597,7 +602,8 @@ func (c *Controller) startWorkers(stopCh <-chan struct{}) {
 		}
 	}, 20*time.Second, stopCh)
 
-	if c.config.EnableExternalVpc {
+	// do not sync neutron router because that cluster router is created by neutron
+	if c.config.EnableExternalVpc && !c.config.NeutronRouter {
 		go wait.Until(func() {
 			c.syncExternalVpc()
 		}, 5*time.Second, stopCh)
