@@ -77,7 +77,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 
 	klog.Infof("add port request %v", podRequest)
 	var gatewayCheckMode int
-	var macAddr, ip, ipAddr, cidr, gw, subnet, ingress, egress, providerNetwork, ifName, nicType, podNicName, priority string
+	var macAddr, ip, ipAddr, cidr, gw, subnet, ingress, egress, providerNetwork, ifName, nicType, podNicName, priority, vmName string
 	var isDefaultRoute bool
 	var portID string
 	var pod *v1.Pod
@@ -116,6 +116,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 		egress = pod.Annotations[fmt.Sprintf(util.EgressRateAnnotationTemplate, podRequest.Provider)]
 		priority = pod.Annotations[fmt.Sprintf(util.PriorityAnnotationTemplate, podRequest.Provider)]
 		providerNetwork = pod.Annotations[fmt.Sprintf(util.ProviderNetworkTemplate, podRequest.Provider)]
+		vmName = pod.Annotations[fmt.Sprintf(util.VmTemplate, podRequest.Provider)]
 		ipAddr = util.GetIpAddrWithMask(ip, cidr)
 		ifName = podRequest.IfName
 		portID = pod.Annotations[neutron.PORT_ID]
@@ -135,6 +136,11 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 				isDefaultRoute = true
 			}
 		}
+
+		if vmName != "" {
+			podRequest.PodName = vmName
+		}
+
 		break
 	}
 
@@ -371,6 +377,11 @@ func (csh cniServerHandler) handleDel(req *restful.Request, resp *restful.Respon
 		} else {
 			nicType = pod.Annotations[util.PodNicAnnotation]
 		}
+		vmName := pod.Annotations[fmt.Sprintf(util.VmTemplate, podRequest.Provider)]
+		if vmName != "" {
+			podRequest.PodName = vmName
+		}
+
 		err = csh.deleteNic(podRequest.PodName, podRequest.PodNamespace, podRequest.ContainerID, podRequest.DeviceID, podRequest.IfName, nicType)
 		if err != nil {
 			errMsg := fmt.Errorf("del nic failed %v", err)

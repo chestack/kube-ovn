@@ -20,7 +20,6 @@ import (
 	"k8s.io/klog/v2"
 
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
-	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	"github.com/kubeovn/kube-ovn/pkg/ovs"
 	"github.com/kubeovn/kube-ovn/pkg/request"
 	"github.com/kubeovn/kube-ovn/pkg/util"
@@ -46,18 +45,21 @@ func (csh cniServerHandler) configureNic(podName, podNamespace, provider, netns,
 			return err
 		}
 	}
-	pod, err := csh.Controller.podsLister.Pods(podNamespace).Get(podName)
-	if err != nil {
-		errMsg := fmt.Errorf("get pod %s/%s failed %v", podNamespace, podName, err)
-		klog.Error(errMsg)
-		return err
-	}
+	// 在kubevirt虚机pod场景下，使用vm name代替pod name，get接口会失败报错
+	// 此处逻辑仅当v1.multus-cni.io/default-network: secure-container/kube-ovn时需要，暂时注释
+	// pod, err := csh.Controller.podsLister.Pods(podNamespace).Get(podName)
+	// if err != nil {
+	// 	errMsg := fmt.Errorf("get pod %s/%s failed %v", podNamespace, podName, err)
+	// 	klog.Error(errMsg)
+	// 	return err
+	// }
 
 	ipStr := util.GetIpWithoutMask(ip)
 	ifaceID := ovs.PodNameToPortName(podName, podNamespace, provider)
-	if portID := pod.Annotations[neutron.PORT_ID]; portID != "" {
-		ifaceID = portID
-	}
+	// 原因同上
+	// if portID := pod.Annotations[neutron.PORT_ID]; portID != "" {
+	// 	ifaceID = portID
+	// }
 	ovs.CleanDuplicatePort(ifaceID)
 	// Add veth pair host end to ovs port
 	output, err := ovs.Exec(ovs.MayExist, "add-port", "br-int", hostNicName, "--",
@@ -81,12 +83,16 @@ func (csh cniServerHandler) configureNic(podName, podNamespace, provider, netns,
 		return err
 	}
 
-	// 如果是 Neutron，这里应该跳过。带宽由 Neutron 的QoS 负责
-	if !neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) {
-		if err = ovs.SetInterfaceBandwidth(podName, podNamespace, ifaceID, egress, ingress, priority); err != nil {
-			return err
-		}
+	if err = ovs.SetInterfaceBandwidth(podName, podNamespace, ifaceID, egress, ingress, priority); err != nil {
+		return err
 	}
+	// 如果是 Neutron，这里应该跳过。带宽由 Neutron 的QoS 负责
+	// 原因同上
+	// if !neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) {
+	// 	if err = ovs.SetInterfaceBandwidth(podName, podNamespace, ifaceID, egress, ingress, priority); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	if containerNicName == "" {
 		return nil
