@@ -107,3 +107,134 @@ type PortList struct {
 
 	Items []Port `json:"items"`
 }
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +genclient:nonNamespaced
+
+type Fip struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   FipSpec   `json:"spec"`
+	Status FipStatus `json:"status,omitempty"`
+}
+
+// AllocationPool represents a sub-range of cidr available for dynamic
+// allocation to ports, e.g. {Start: "10.0.0.2", End: "10.0.0.254"}
+type AllocationPool struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+type FipSpec struct {
+	// Description for the floating IP instance.
+	Description string `json:"description"`
+
+	// ExternalNetworkID is the UUID of the external network id.
+	ExternalNetworkID string `json:"externalNetworkID"`
+
+	// ExternalNetworkName is the external network name.
+	ExternalNetworkName string `json:"externalNetworkName"`
+
+	// Sub-ranges of CIDR available for dynamic allocation to ports.
+	// See AllocationPool.
+	AllocationPools []AllocationPool `json:"allocationPools"`
+}
+
+// NeutronRouter
+type NeutronRouter struct {
+	// NeutronRouterID is the UUID of the neutron router id.
+	NeutronRouterID string `json:"neutronRouterID"`
+
+	// NeutronRouterName is the neutron router name.
+	NeutronRouterName string `json:"neutronRouterName"`
+
+	// AvailabilityZone
+	AvailabilityZone string `json:"availabilityZone"`
+
+	// ExternalGatewayIP is the address of the external network getaway.
+	ExternalGatewayIP string `json:"externalGatewayIP"`
+
+	// Subnets is the UUID of the router subnet id.
+	Subnets []string `json:"subnets"`
+}
+
+// AllocatedIP
+type AllocatedIP struct {
+	// IP is floating ip
+	IP string `json:"ip"`
+
+	// Type is type of floating ip, egg: eip/snat
+	Type string `json:"type"`
+
+	// Resources is bound resource list of floating ip, egg: pod_name
+	Resources []string `json:"resources"`
+}
+
+type FipStatus struct {
+	// Conditions represents the latest state of the object
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []FipCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// RouterID is the ID of the router used for this floating IP.
+	NeutronRouters []NeutronRouter `json:"neutronRouters"`
+
+	// AllocatedIPs is the address of the floating IP has been allocated by ecnf.
+	AllocatedIPs []AllocatedIP `json:"allocatedIPs"`
+
+	// ForbiddenIPs is the address of the floating IP has been allocated by proton.
+	ForbiddenIPs []string `json:"forbiddenIPs"`
+}
+
+type FipPatch struct {
+	// Op is sync operator type
+	Op string `json:"op"`
+
+	// Name is sync operator resource name
+	Name string `json:"name"`
+
+	// Path is sync operator resource path
+	Path string `json:"path"`
+
+	// NeutronRouters is sync operator resource value
+	NeutronRouters []NeutronRouter `json:"neutronRouters"`
+
+	// AllocatedIP is sync operator resource value
+	AllocatedIP AllocatedIP `json:"allocatedIP"`
+
+	// ForbiddenIPs is sync operator resource value
+	ForbiddenIPs []string `json:"forbiddenIPs"`
+}
+
+// Condition describes the state of an object at a certain point.
+// +k8s:deepcopy-gen=true
+type FipCondition struct {
+	// Type of condition.
+	Type ConditionType `json:"type"`
+	// Status of the condition, one of True, False, Unknown.
+	Status corev1.ConditionStatus `json:"status"`
+	// The reason for the condition's last transition.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// A human readable message indicating details about the transition.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// Last time the condition was probed
+	// +optional
+	LastUpdateTime metav1.Time `json:"lastUpdateTime,omitempty"`
+	// Last time the condition transitioned from one status to another.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type FipList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []Fip `json:"items"`
+}

@@ -26,12 +26,17 @@ import (
 
 type KubeovnV1Interface interface {
 	RESTClient() rest.Interface
+	FipsGetter
 	PortsGetter
 }
 
 // KubeovnV1Client is used to interact with features provided by the kubeovn.io group.
 type KubeovnV1Client struct {
 	restClient rest.Interface
+}
+
+func (c *KubeovnV1Client) Fips() FipInterface {
+	return newFips(c)
 }
 
 func (c *KubeovnV1Client) Ports(namespace string) PortInterface {
