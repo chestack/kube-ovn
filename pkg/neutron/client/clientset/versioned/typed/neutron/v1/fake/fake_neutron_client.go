@@ -28,6 +28,10 @@ type FakeKubeovnV1 struct {
 	*testing.Fake
 }
 
+func (c *FakeKubeovnV1) Fips() v1.FipInterface {
+	return &FakeFips{c}
+}
+
 func (c *FakeKubeovnV1) Ports(namespace string) v1.PortInterface {
 	return &FakePorts{c, namespace}
 }
