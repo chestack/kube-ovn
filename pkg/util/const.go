@@ -65,6 +65,7 @@ const (
 	IngressRateAnnotation = "ovn.kubernetes.io/ingress_rate"
 	EgressRateAnnotation  = "ovn.kubernetes.io/egress_rate"
 
+	ProjectIDAnnotation     = "ovn.kubernetes.io/project_id"
 	PortNameAnnotation      = "ovn.kubernetes.io/port_name"
 	LogicalSwitchAnnotation = "ovn.kubernetes.io/logical_switch"
 
@@ -158,7 +159,8 @@ const (
 	NetemQosLimitAnnotationTemplate   = "%s.kubernetes.io/limit"
 	NetemQosLossAnnotationTemplate    = "%s.kubernetes.io/loss"
 
-	NeutronRouterTag  =  "kubernetes-pod"
-	NeutronNetworkNodeLabelKey = "openstack-network-node"
+	NeutronFipTag                = "kubernetes-pod"
+	NeutronRouterTag             = "kubernetes-pod"
+	NeutronNetworkNodeLabelKey   = "openstack-network-node"
 	NeutronNetworkNodeLabelValue = "enabled"
 )

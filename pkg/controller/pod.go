@@ -700,6 +700,14 @@ func (c *Controller) handleAddPod(key string) error {
 		}
 	}
 
+	// 如果 Pod 的注解上有 "ovn.kubernetes.io/eip" 或 "ovn.kubernetes.io/snat"，
+	// 则根据注解中的ip地址创建一个 neutron fip 资源
+	err = c.handleFip("add", pod)
+	if err != nil {
+		klog.Errorf("handle fip add failed, pod: %+v, err: %+v\n", pod, err)
+		return err
+	}
+
 	if _, err := c.config.KubeClient.CoreV1().Pods(namespace).Patch(context.Background(), name, types.JSONPatchType, generatePatchPayload(pod.Annotations, op), metav1.PatchOptions{}, ""); err != nil {
 		if k8serrors.IsNotFound(err) {
 			// Sometimes pod is deleted between kube-ovn configure ovn-nb and patch pod.
@@ -821,6 +829,15 @@ func (c *Controller) handleDeletePod(pod *v1.Pod) error {
 		}
 	}
 	c.ipam.ReleaseAddressByPod(key)
+
+	// 如果 Pod 的注解上有 "ovn.kubernetes.io/eip" 或 "ovn.kubernetes.io/snat"，
+	// 则根据注解中的ip地址删除对应的 neutron fip 资源
+	err = c.handleFip("del", pod)
+	if err != nil {
+		klog.Errorf("handle fip del failed, pod: %+v, err: %+v\n", pod, err)
+		return err
+	}
+
 	return nil
 }
 

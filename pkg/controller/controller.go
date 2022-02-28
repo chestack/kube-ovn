@@ -406,6 +406,10 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 		klog.Fatalf("failed to init 'deny_all' security group: %v", err)
 	}
 
+	if err := c.initFip(); err != nil {
+		klog.Fatalf("failed to init fip resource: %v", err)
+	}
+
 	// remove resources in ovndb that not exist any more in kubernetes resources
 	if err := c.gc(); err != nil {
 		klog.Fatalf("gc failed: %v", err)
@@ -617,4 +621,7 @@ func (c *Controller) startWorkers(stopCh <-chan struct{}) {
 	}
 
 	go wait.Until(c.syncVmLiveMigrationPort, 15*time.Second, stopCh)
+
+	go wait.Until(c.syncFip(), 3*time.Second, stopCh)
+	go wait.Until(c.gcFip(), 60*time.Second, stopCh)
 }
