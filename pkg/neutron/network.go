@@ -5,8 +5,6 @@ import (
 
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/mtu"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
-	"github.com/gophercloud/gophercloud/pagination"
-	"k8s.io/klog"
 )
 
 func (c Client) ListSubnets() error {
@@ -73,33 +71,4 @@ func (c Client) getNetworkAsync(id string) func() (*networks.Network, int, error
 			return sb, MTU, nil
 		}
 	}
-}
-
-func (c Client) GetNetworkFromName(name string) (networks.Network, error) {
-	var (
-		actual []networks.Network
-		err    error
-	)
-	opt := networks.ListOpts{
-		Name: name,
-	}
-	err = networks.List(c.networkCliV2, opt).EachPage(func(page pagination.Page) (bool, error) {
-
-		actual, err = networks.ExtractNetworks(page)
-		if err != nil {
-			klog.Errorf("Failed to extract networks: %v", err)
-			return false, err
-		}
-
-		return true, nil
-	})
-
-	for _, n := range actual {
-		if n.Name == name {
-			return n, nil
-		}
-	}
-
-	klog.Errorf("Failed to get network from name: %s", name)
-	return networks.Network{}, nil
 }

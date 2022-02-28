@@ -4,7 +4,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
 )
 
-func (c Client) GetSubnet(id string) (*subnets.Subnet, error) {
+func (c Client) getSubnet(id string) (*subnets.Subnet, error) {
 	r := subnets.Get(c.networkCliV2, id)
 	return r.Extract()
 }
@@ -14,7 +14,7 @@ func (c Client) getSubnetAsync(id string) func() (*subnets.Subnet, error) {
 	chErr := make(chan error)
 
 	go func() {
-		sb, err := c.GetSubnet(id)
+		sb, err := c.getSubnet(id)
 		if err != nil {
 			chErr <- err
 		} else {

@@ -18,10 +18,6 @@ limitations under the License.
 
 package v1
 
-// FipListerExpansion allows custom methods to be added to
-// FipLister.
-type FipListerExpansion interface{}
-
 // PortListerExpansion allows custom methods to be added to
 // PortLister.
 type PortListerExpansion interface{}
