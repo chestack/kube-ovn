@@ -28,16 +28,10 @@ type NeutronController struct {
 	kubeNtrnCli clientset.Interface
 	kubeCli     k8s.Interface
 
-	fipsLister lister.FipLister
-	fipsSyncd  cache.InformerSynced
-
 	portsLister lister.PortLister
 	portsSyncd  cache.InformerSynced
 
-	fipKeyMutex  *keymutex.KeyMutex
 	portKeyMutex *keymutex.KeyMutex
-
-	syncFipQueue workqueue.RateLimitingInterface
 
 	addPortQueue    workqueue.RateLimitingInterface
 	deletePortQueue workqueue.RateLimitingInterface
@@ -55,23 +49,16 @@ func MustNewNeutronController(config *Configuration) *NeutronController {
 		}))
 
 	portsInformer := informerFactory.Kubeovn().V1().Ports()
-	fipsInformer := informerFactory.Kubeovn().V1().Fips()
 
 	c := &NeutronController{
 		ntrnCli:     neutron.NewClient(),
 		kubeNtrnCli: kubeNtrnCli,
 		kubeCli:     config.KubeClient,
 
-		fipsLister: fipsInformer.Lister(),
-		fipsSyncd:  fipsInformer.Informer().HasSynced,
-
 		portsLister: portsInformer.Lister(),
 		portsSyncd:  portsInformer.Informer().HasSynced,
 
-		fipKeyMutex:  keymutex.New(97),
 		portKeyMutex: keymutex.New(97),
-
-		syncFipQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "SyncFip"),
 
 		addPortQueue:    workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "AddPort"),
 		deletePortQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "DeletePort"),
@@ -151,13 +138,11 @@ func (c *NeutronController) run(stopCh <-chan struct{}) {
 
 	klog.Info("wait for neutron informers to sync")
 
-	if ok := cache.WaitForCacheSync(stopCh, c.fipsSyncd, c.portsSyncd); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.portsSyncd); !ok {
 		klog.Fatal("neutron informer failed to sync")
 	}
 
 	for i := 0; i < 5; i++ {
-		go wait.Until(c.runSyncFipWorker(), time.Second, stopCh)
-
 		go wait.Until(c.runAddPortWorker(), time.Second, stopCh)
 		go wait.Until(c.runDeletePortWorker(), time.Second, stopCh)
 		go wait.Until(c.runUpdatePortWorker(), time.Second, stopCh)
@@ -174,8 +159,6 @@ func (c *NeutronController) shutdown() {
 	klog.Info("shutting down Neutron controller")
 
 	utilruntime.HandleCrash()
-
-	c.syncFipQueue.ShutDown()
 
 	c.addPortQueue.ShutDown()
 	c.deletePortQueue.ShutDown()
@@ -210,39 +193,6 @@ func runWorker(action string, q workqueue.RateLimitingInterface, handle func(int
 
 			last := time.Since(now)
 			klog.Infof("takes %d ms to %s neutron port %s", last.Milliseconds(), action, key)
-			q.Forget(obj)
-			return nil
-		}(obj)
-
-		if err != nil {
-			utilruntime.HandleError(err)
-		}
-		return true
-	}() {
-		// do nothing inside for-loop
-	}
-}
-
-func syncWorker(action string, q workqueue.RateLimitingInterface, handle func(interface{}) error) {
-	for func() bool {
-		obj, shutdown := q.Get()
-		if shutdown {
-			return false
-		}
-		now := time.Now()
-
-		err := func(obj interface{}) error {
-			defer q.Done(obj)
-
-			klog.Infof("worker handles %s neutron fip", action)
-
-			if err := handle(obj); err != nil {
-				q.AddRateLimited(obj)
-				return fmt.Errorf("%s error: %s, requeuing", action, err.Error())
-			}
-
-			last := time.Since(now)
-			klog.Infof("takes %d ms to %s neutron fip", last.Milliseconds(), action)
 			q.Forget(obj)
 			return nil
 		}(obj)
