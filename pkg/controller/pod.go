@@ -1223,9 +1223,9 @@ func (c *Controller) getPodAttachmentNet(pod *v1.Pod) ([]*kubeovnNet, error) {
 				providerName = util.OvnProvider
 			} else {
 				providerName = fmt.Sprintf("%s.%s.ovn", attach.Name, attach.Namespace)
-				if pod.Annotations[fmt.Sprintf(util.LiveMigrationAnnotationTemplate, providerName)] == "true" {
-					allowLiveMigration = true
-				}
+			}
+			if pod.Annotations[fmt.Sprintf(util.LiveMigrationAnnotationTemplate, providerName)] == "true" {
+				allowLiveMigration = true
 			}
 			subnetName := pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, providerName)]
 			if !isDefault && subnetName == "" {
@@ -1321,7 +1321,7 @@ func (c *Controller) acquireAddress(pod *v1.Pod, podNet *kubeovnNet) (string, st
 		for {
 			nicName := ovs.PodNameToPortName(pod.Name, pod.Namespace, podNet.ProviderName)
 
-			ipv4, ipv6, mac, err := c.ipam.GetRandomAddress(key, nicName, macStr, podNet.Subnet.Name, skippedAddrs)
+			ipv4, ipv6, mac, err := c.ipam.GetRandomAddress(key, nicName, macStr, podNet.Subnet.Name, skippedAddrs, !podNet.AllowLiveMigration)
 			if err != nil {
 				return "", "", "", err
 			}

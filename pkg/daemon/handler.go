@@ -174,11 +174,13 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 			podSubnet.Spec.DisableGatewayCheck = true
 		}
 
-		if !podSubnet.Spec.DisableGatewayCheck {
-			if podSubnet.Spec.Vlan != "" && !podSubnet.Spec.LogicalGateway {
-				gatewayCheckMode = gatewayCheckModeArping
-			} else {
-				gatewayCheckMode = gatewayCheckModePing
+		if pod.Annotations[fmt.Sprintf(util.LiveMigrationAnnotationTemplate, podRequest.Provider)] != "true" {
+			if !podSubnet.Spec.DisableGatewayCheck {
+				if podSubnet.Spec.Vlan != "" && !podSubnet.Spec.LogicalGateway {
+					gatewayCheckMode = gatewayCheckModeArping
+				} else {
+					gatewayCheckMode = gatewayCheckModePing
+				}
 			}
 		}
 
