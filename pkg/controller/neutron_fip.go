@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/layer3/floatingips"
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 	"github.com/kubeovn/kube-ovn/pkg/neutron"
 	neutronv1 "github.com/kubeovn/kube-ovn/pkg/neutron/apis/neutron/v1"
@@ -76,23 +75,40 @@ func (c *Controller) syncFip() func() {
 
 			oldFip, err := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Get(context.TODO(), externalNetwork.ID, metav1.GetOptions{})
 			if err == nil {
-				// 如果fip cr已存在，则判断neutronRouters是否发生变更
-				// 如果fip cr 所关联的 neutron routers 信息未发生变更，则不需要更新
+				// fip cr已存在，判断neutronRouters是否发生变更，如果fip cr 所关联的 neutron routers 信息未发生变更，则不需要更新
 				sort.Sort(NeutronRoutersByID(oldFip.Status.NeutronRouters))
 				sort.Sort(NeutronRoutersByID(neutronRouters))
-				if reflect.DeepEqual(oldFip.Status.NeutronRouters, neutronRouters) {
-					// klog.Info("neutronRouters of fip deep equal, no sync required")
-					continue
+				if !reflect.DeepEqual(oldFip.Status.NeutronRouters, neutronRouters) {
+					fipPatch := &neutronv1.FipPatch{
+						Op:             "replace",
+						Name:           oldFip.Name,
+						Path:           "/status/neutronRouters",
+						NeutronRouters: neutronRouters,
+					}
+					klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+					c.neutronController.syncFipQueue.Add(fipPatch)
+
 				}
 
-				fipPatch := &neutronv1.FipPatch{
-					Op:             "replace",
-					Name:           oldFip.Name,
-					Path:           "/status/neutronRouters",
-					NeutronRouters: neutronRouters,
+				forbiddenIPs, err := getForbiddenIPs(externalNetwork.ID)
+				if err != nil {
+					klog.Errorf("get forbidden ips failed, externalNetworkID: %s, err: %+v\n", externalNetwork.ID, err)
+					return
 				}
-				klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
-				c.neutronController.syncFipQueue.Add(fipPatch)
+
+				// fip cr已存在，判断forbiddenIPs是否发生变更，如果fip cr 所关联的 forbiddenIPs 信息未发生变更，则不需要更新
+				sort.Sort(sort.StringSlice(oldFip.Status.ForbiddenIPs))
+				sort.Sort(sort.StringSlice(forbiddenIPs))
+				if !reflect.DeepEqual(oldFip.Status.ForbiddenIPs, forbiddenIPs) {
+					fipPatch := &neutronv1.FipPatch{
+						Op:           "replace",
+						Name:         oldFip.Name,
+						Path:         "/status/forbiddenIPs",
+						ForbiddenIPs: forbiddenIPs,
+					}
+					klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+					c.neutronController.syncFipQueue.Add(fipPatch)
+				}
 
 				continue
 			}
@@ -111,32 +127,6 @@ func (c *Controller) syncFip() func() {
 				continue
 			}
 			klog.Infof("create floating ip cr success to api server, fip: %+v\n", fip)
-		}
-
-		fips, err := neutron.NewClient().ListFip()
-		if err != nil {
-			klog.Errorf("list fip from neutron failed, err: %+v\n", err)
-		}
-
-		fipMap := getFloatingIPMap(fips)
-		for fipName, forbiddenIPs := range fipMap {
-			oldFip, err := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Get(context.TODO(), fipName, metav1.GetOptions{})
-			if err == nil {
-				sort.Sort(sort.StringSlice(oldFip.Status.ForbiddenIPs))
-				sort.Sort(sort.StringSlice(forbiddenIPs))
-				if reflect.DeepEqual(oldFip.Status.ForbiddenIPs, forbiddenIPs) {
-					// klog.Info("forbiddenIPs of fip cr deep equal, no sync required")
-					continue
-				}
-			}
-			fipPatch := &neutronv1.FipPatch{
-				Op:           "replace",
-				Name:         fipName,
-				Path:         "/status/forbiddenIPs",
-				ForbiddenIPs: forbiddenIPs,
-			}
-			klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
-			c.neutronController.syncFipQueue.Add(fipPatch)
 		}
 	}
 }
@@ -163,6 +153,10 @@ func (c *Controller) gcFip() func() {
 		for _, fip := range fipList {
 			for _, allocatedIP := range fip.Status.AllocatedIPs {
 				if allocatedIP.Type == util.EipAnnotation {
+					if len(allocatedIP.Resources) != 1 {
+						klog.Errorf("resources type error, allocatedIP: %+v\n", allocatedIP)
+						return
+					}
 					resources := strings.Split(allocatedIP.Resources[0], "/")
 					if len(resources) != 2 {
 						klog.Errorf("resource type error, allocatedIP: %+v\n", allocatedIP)
@@ -174,13 +168,14 @@ func (c *Controller) gcFip() func() {
 						_, err = c.config.KubeClient.CoreV1().Pods(resources[0]).Get(context.TODO(), resources[1], metav1.GetOptions{})
 						newfip, _ := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Get(context.TODO(), fip.Name, metav1.GetOptions{})
 						if allocatedIPIsExist(allocatedIP, newfip.Status.AllocatedIPs) && k8serrors.IsNotFound(err) {
-							// 删除 proton floatingip 资源
-							err := neutron.NewClient().DeleteFipFromIP(allocatedIP.IP)
+							// 删除 proton port floatingip 资源
+							err := neutron.NewClient().DeletePortWithFip(newfip.Spec.ExternalNetworkID, allocatedIP.IP)
 							if err != nil {
-								klog.Errorf("delete floatingip from proton api failed, err: %+v\n", err)
-								return
+								klog.Errorf("delete port with floatingip from proton api failed, floatingip: %s, err: %+v\n", allocatedIP.IP, err)
+								continue
 							}
-							klog.Infof("delete floatingip from proton api success, floatingip: %s", allocatedIP.IP)
+							klog.Infof("delete port with floatingip from proton api success, floatingip: %s", allocatedIP.IP)
+
 							fipPatch := &neutronv1.FipPatch{
 								Op:          "del",
 								Name:        fip.Name,
@@ -385,21 +380,6 @@ func (c *Controller) initFip() error {
 	return nil
 }
 
-// getFloatingIPMap 该函数将 proton fip 资源转换为 map 格式，key 为外部网络ID，value为 fip 列表
-func getFloatingIPMap(fips []floatingips.FloatingIP) map[string][]string {
-	var (
-		fipMap = make(map[string][]string)
-	)
-	for _, fip := range fips {
-		if _, ok := fipMap[fip.FloatingNetworkID]; ok {
-			fipMap[fip.FloatingNetworkID] = append(fipMap[fip.FloatingNetworkID], fip.FloatingIP)
-			continue
-		}
-		fipMap[fip.FloatingNetworkID] = []string{fip.FloatingIP}
-	}
-	return fipMap
-}
-
 // gen neutron routers
 func genNeutronRouters(vpcs []*kubeovnv1.Vpc) []neutronv1.NeutronRouter {
 	var (
@@ -422,6 +402,25 @@ func genNeutronRouters(vpcs []*kubeovnv1.Vpc) []neutronv1.NeutronRouter {
 	}
 
 	return newtronRouters
+}
+
+// get forbidden ips
+func getForbiddenIPs(networkID string) ([]string, error) {
+	var (
+		forbiddenIPs []string
+	)
+
+	ports, err := neutron.NewClient().ListPortWithNetworkID(networkID)
+	if err != nil {
+		klog.Errorf("list port with neutron id failed, networkID: %s, err: %+v\n", networkID, err)
+		return nil, err
+	}
+	for _, port := range ports {
+		for _, fixedIP := range port.FixedIPs {
+			forbiddenIPs = append(forbiddenIPs, fixedIP.IPAddress)
+		}
+	}
+	return forbiddenIPs, nil
 }
 
 // getAllocationPools 该函数将外部网络下所有子网的 AllocationPool 合并返回
@@ -487,7 +486,6 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 	var (
 		eip           string
 		snat          string
-		projectID     string
 		logicalRouter string
 	)
 
@@ -506,14 +504,6 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 		return errors.New("not support eip is the same as snat")
 	}
 
-	if _, ok := pod.Annotations[util.ProjectIDAnnotation]; ok {
-		projectID = pod.Annotations[util.ProjectIDAnnotation]
-	}
-	if projectID == "" {
-		klog.Error("project_id annotation not found")
-		return errors.New("project_id annotation not found")
-	}
-
 	if _, ok := pod.Annotations[util.LogicalRouterAnnotation]; ok {
 		logicalRouter = pod.Annotations[util.LogicalRouterAnnotation]
 	}
@@ -522,7 +512,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 		return errors.New("logical_router annotation not found")
 	}
 
-	klog.Infof("get pod annotations, eip: %s, snat: %s, projectID: %s, logicalRouter: %s\n", eip, snat, projectID, logicalRouter)
+	klog.Infof("get pod annotations, eip: %s, snat: %s, logicalRouter: %s\n", eip, snat, logicalRouter)
 
 	vpc, err := c.vpcsLister.Get(logicalRouter)
 	if err != nil {
@@ -536,9 +526,9 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 		return err
 	}
 
-	oldFip, err := c.neutronController.fipsLister.Get(externalNetwork.ID)
+	oldFip, err := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Get(context.TODO(), externalNetwork.ID, metav1.GetOptions{})
 	if err != nil {
-		klog.Errorf("get fip cr failed, name: %s\n", externalNetwork.ID)
+		klog.Errorf("get fip failed, name: %s\n", externalNetwork.ID)
 		return err
 	}
 	klog.Infof("handle fip, oldFip: %+v\n", oldFip)
@@ -554,20 +544,13 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 
 		// 判断eip是否可用
 		if isAvailable(eip, oldFip) {
-			// 创建 proton floatingip 资源
-			floatingip, err := neutron.NewClient().CreateFip(externalNetwork.ID, eip, projectID)
+			// 创建 porton port 资源并绑定 floatingip 资源
+			port, err := neutron.NewClient().CreatePortWithFip(externalNetwork.ID, eip)
 			if err != nil {
-				klog.Errorf("create floatingip from proton api failed, err: %+v\n", err)
+				klog.Errorf("create port with floatingip from proton api failed, floatingip: %s, err: %+v\n", snat, err)
 				return err
 			}
-			klog.Infof("create floatingip from proton api success, floatingip: %+v\n", floatingip)
-
-			// 给 proton floatingip 资源打上 'container' tag
-			err = neutron.NewClient().AddTag("floatingips", floatingip.ID, util.NeutronFipTag)
-			if err != nil {
-				klog.Errorf("add floating ip tag failed, err: %+v\n", err)
-				return err
-			}
+			klog.Infof("create port with floatingip from proton api success, port: %s, floatingip: %s", port.ID, eip)
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容
 			fipPatch := genEipPatch(op, eip, resource, oldFip)
@@ -581,20 +564,13 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 			// 如果snat是第一次被申请，则需要创建proton floatingip资源
 			// 如果snat已经被其他pod使用，则共享proton floatingip资源，不需要创建
 			if isAvailable(snat, oldFip) {
-				// 创建 proton floatingip 资源
-				floatingip, err := neutron.NewClient().CreateFip(externalNetwork.ID, snat, projectID)
+				// 创建 porton port 资源并绑定 floatingip 资源
+				port, err := neutron.NewClient().CreatePortWithFip(externalNetwork.ID, snat)
 				if err != nil {
-					klog.Errorf("create fip from proton api failed, err: %+v\n", err)
+					klog.Errorf("create port with floatingip from proton api failed, floatingip: %s, err: %+v\n", snat, err)
 					return err
 				}
-				klog.Infof("create floatingip from proton api success, floatingip: %+v\n", floatingip)
-
-				// 给 proton floatingip 资源打上 'container' tag
-				err = neutron.NewClient().AddTag("floatingips", floatingip.ID, util.NeutronFipTag)
-				if err != nil {
-					klog.Errorf("add floating ip tag failed, err: %+v\n", err)
-					return err
-				}
+				klog.Infof("create port with floatingip from proton api success, port: %s, floatingip: %s", port.ID, snat)
 			}
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容
@@ -605,13 +581,12 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 	case "del":
 		// 判断eip是否正在被当前pod使用
 		if isPodEipAllocated(eip, resource, oldFip) {
-			// 删除 proton floatingip 资源
-			err := neutron.NewClient().DeleteFipFromIP(eip)
+			err := neutron.NewClient().DeletePortWithFip(externalNetwork.ID, eip)
 			if err != nil {
-				klog.Errorf("delete floatingip from proton api failed, err: %+v\n", err)
+				klog.Errorf("delete port with floatingip from proton api failed, floatingip: %s, err: %+v\n", eip, err)
 				return err
 			}
-			klog.Infof("delete floatingip from proton api success, floatingip: %s", eip)
+			klog.Infof("delete port with floatingip from proton api success, floatingip: %s", eip)
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容
 			fipPatch := genEipPatch(op, eip, resource, oldFip)
@@ -624,13 +599,12 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 			// 判断snat是否正在被当前pod唯一使用
 			// 若snat被当前pod唯一使用，则pod删除后需要同步删除对应proton floatingip资源
 			if isSnatUniqueAllocated(snat, resource, oldFip) {
-				// 删除 proton floatingip 资源
-				err := neutron.NewClient().DeleteFipFromIP(snat)
+				err := neutron.NewClient().DeletePortWithFip(externalNetwork.ID, snat)
 				if err != nil {
-					klog.Errorf("delete floatingip from proton api failed, err: %+v\n", err)
+					klog.Errorf("delete port with floatingip from proton api failed, floatingip: %s, err: %+v\n", snat, err)
 					return err
 				}
-				klog.Infof("delete floatingip from proton api success, floatingip: %s", snat)
+				klog.Infof("delete port with floatingip from proton api success, floatingip: %s", snat)
 			}
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容

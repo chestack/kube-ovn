@@ -1,12 +1,14 @@
 package neutron
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/portsbinding"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/ports"
+	"github.com/gophercloud/gophercloud/pagination"
 	"k8s.io/klog"
 )
 
@@ -20,6 +22,81 @@ type NeutronPort struct {
 	Gateway  string
 	MTU      int
 	Sgs      []string
+}
+
+func (c Client) ListPortWithNetworkID(networkID string) ([]ports.Port, error) {
+	var (
+		opts   ports.ListOpts
+		actual []ports.Port
+		err    error
+	)
+	opts = ports.ListOpts{
+		NetworkID: networkID,
+	}
+	err = ports.List(c.networkCliV2, opts).EachPage(func(page pagination.Page) (bool, error) {
+		actual, err = ports.ExtractPorts(page)
+		if err != nil {
+			klog.Errorf("Failed to extract ports: %v", err)
+			return false, err
+		}
+
+		return true, nil
+	})
+	return actual, err
+}
+
+func (c Client) CreatePortWithFip(networkID, floatingip string) (*ports.Port, error) {
+	type FixedIPOpt struct {
+		SubnetID        string `json:"subnet_id,omitempty"`
+		IPAddress       string `json:"ip_address,omitempty"`
+		IPAddressSubstr string `json:"ip_address_subdir,omitempty"`
+	}
+	type FixedIPOpts []FixedIPOpt
+
+	opts := ports.CreateOpts{
+		NetworkID: networkID,
+		FixedIPs: FixedIPOpts{
+			{
+				IPAddress: floatingip,
+			},
+		},
+		DeviceOwner: "network:kubernetes-pod",
+	}
+
+	p, err := ports.Create(c.networkCliV2, opts).Extract()
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (c Client) DeletePortWithFip(networkID, floatingip string) error {
+	var (
+		opts   ports.ListOpts
+		actual []ports.Port
+		err    error
+	)
+	opts = ports.ListOpts{
+		NetworkID: networkID,
+	}
+	err = ports.List(c.networkCliV2, opts).EachPage(func(page pagination.Page) (bool, error) {
+		actual, err = ports.ExtractPorts(page)
+		if err != nil {
+			klog.Errorf("Failed to extract ports: %v", err)
+			return false, err
+		}
+
+		return true, nil
+	})
+	for _, p := range actual {
+		for _, ip := range p.FixedIPs {
+			if ip.IPAddress == floatingip {
+				return ports.Delete(c.networkCliV2, p.ID).ExtractErr()
+			}
+		}
+	}
+	klog.Errorf("Delete port failed, fip: %s, err: not found.", floatingip)
+	return errors.New("delete port failed, err: not found")
 }
 
 func (c Client) CreatePort(name, project, network, subnet string, ip string, sgs string) (NeutronPort, error) {
