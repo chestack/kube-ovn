@@ -407,7 +407,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	}
 
 	if err := c.initFip(); err != nil {
-		klog.Fatalf("failed to init fip resource: %v", err)
+		klog.Warningf("failed to init fip resource: %v", err)
 	}
 
 	// remove resources in ovndb that not exist any more in kubernetes resources
