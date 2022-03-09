@@ -72,16 +72,17 @@ type Configuration struct {
 	EnableExternalVpc bool
 
 	// 表示集群节点中未安装 ovn，只能调用 Neutron 相关接口。初始化时从环境变量中配置
-	NoOVN                 bool
-	ExternalGatewayNS     string
-	ExternalGatewayNet    string
-	ExternalGatewayVlanID int
-	NeutronRouter         bool
-	NeutronDefaultExternalNet    string
-	NSWhiteLabels         string
-	NSWhiteList           string
-	SharedServices        string
-	DNSServiceIP          string
+	NoOVN                     bool
+	ExternalGatewayNS         string
+	ExternalGatewayNet        string
+	ExternalGatewayVlanID     int
+	NeutronRouter             bool
+	NeutronDefaultExternalNet string
+	NSWhiteLabels             string
+	NSWhiteList               string
+	SharedServices            string
+	DNSServiceIP              string
+	DefaultNS                 string
 }
 
 // ParseFlags parses cmd args then init kubeclient and conf
@@ -127,15 +128,16 @@ func ParseFlags() (*Configuration, error) {
 		argEnableNP             = pflag.Bool("enable-np", true, "Enable network policy support, default: true")
 		argEnableExternalVpc    = pflag.Bool("enable-external-vpc", true, "Enable external vpc support, default: true")
 
-		argExternalGatewayNS     = pflag.String("external-gateway-ns", "secure-container", "The namespace of configmap external-gateway-config, default: secure-container")
-		argExternalGatewayNet    = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
-		argExternalGatewayVlanID = pflag.Int("external-gateway-vlanid", 0, "The vlanId of port ln-ovn-external, default: 0")
-		argNodeWhiteLabels       = pflag.String("node-white-labels", "secure-container=enabled,kubevirt=enabled", " whichlist nodes which will allocated ip from default logic switch, default: secure-container=enabled,kubevirt=enabled")
-		argNeutronRouter         = pflag.Bool("neutron-router", true, "init cluster by calling neutron API, default: true")
-		argDefaultNeutronExternalNet  = pflag.String("default-neutron-external-net", "", "Do not set external gateway if it's empty")
-		argNSWhiteLabels         = pflag.String("ns-white-labels", "ecnf-workload-ns=true,ecnf-reserved-ns=true", "only deal with svc and ep of ns with this label, default: ecnf-workload-ns=true")
-		argNSWhiteList           = pflag.String("ns-white-list", "", "deal with svc and ep of ns in this list")
-		argSharedServices        = pflag.String("shared-services", "default/kubernetes", "shared svc to add loadbalancer rulee to all vpcs")
+		argExternalGatewayNS         = pflag.String("external-gateway-ns", "ecp-eks-managed", "The namespace of configmap external-gateway-config, default: ecp-eks-managed")
+		argExternalGatewayNet        = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
+		argExternalGatewayVlanID     = pflag.Int("external-gateway-vlanid", 0, "The vlanId of port ln-ovn-external, default: 0")
+		argNodeWhiteLabels           = pflag.String("node-white-labels", "secure-container=enabled,openstack-network-node=enabled", " whichlist nodes which will allocated ip from default logic switch, default: secure-container=enabled,openstack-network-node=enabled")
+		argNeutronRouter             = pflag.Bool("neutron-router", true, "init cluster by calling neutron API, default: true")
+		argDefaultNeutronExternalNet = pflag.String("default-neutron-external-net", "", "Do not set external gateway if it's empty")
+		argNSWhiteLabels             = pflag.String("ns-white-labels", "managed.es.io/resource=namespace", "only deal with svc and ep of ns with this label, default: managed.es.io/resource=namespace")
+		argNSWhiteList               = pflag.String("ns-white-list", "", "deal with svc and ep of ns in this list")
+		argSharedServices            = pflag.String("shared-services", "default/kubernetes", "shared svc to add loadbalancer rulee to all vpcs")
+		argDefaultNS                 = pflag.String("default-ns", "ecp-eks-managed", "The default namespace, default: ecp-eks-managed")
 	)
 
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
@@ -210,6 +212,7 @@ func ParseFlags() (*Configuration, error) {
 		NSWhiteList:                   *argNSWhiteList,
 		SharedServices:                *argSharedServices,
 		DNSServiceIP:                  *argDNSServiceIP,
+		DefaultNS:                     *argDefaultNS,
 	}
 
 	if config.NetworkType == util.NetworkTypeVlan && config.DefaultHostInterface == "" {

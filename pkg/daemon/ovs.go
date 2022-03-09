@@ -82,7 +82,7 @@ func (csh cniServerHandler) configureNic(podName, podNamespace, provider, netns,
 	}
 
 	// 如果是 Neutron，这里应该跳过。带宽由 Neutron 的QoS 负责
-	if !neutron.HandledByNeutron(pod.Annotations) {
+	if !neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) {
 		if err = ovs.SetInterfaceBandwidth(podName, podNamespace, ifaceID, egress, ingress, priority); err != nil {
 			return err
 		}

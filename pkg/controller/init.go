@@ -371,7 +371,7 @@ func (c *Controller) InitIPAM() error {
 	}
 	for _, pod := range pods {
 		//TODO (fix me) ignore non-ovn pod
-		if !neutron.HandledByKubeOvnOrigin(pod.GetAnnotations()) {
+		if !neutron.HandledByKubeOvnOrigin(c.config.DefaultNS, pod.GetAnnotations()) {
 			continue
 		}
 		if isPodAlive(pod) && pod.Annotations[util.AllocatedAnnotation] == "true" {

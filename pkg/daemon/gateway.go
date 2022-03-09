@@ -685,7 +685,7 @@ func (c *Controller) getLocalPodIPsNeedNAT(protocol string) ([]string, error) {
 			continue
 		}
 		//TODO (fix me) ignore non-ovn pod
-		if !neutron.HandledByKubeOvnOrigin(pod.Annotations) {
+		if !neutron.HandledByKubeOvnOrigin(c.config.DefaultNS, pod.Annotations) {
 			continue
 		}
 		subnet, err := c.subnetsLister.Get(pod.Annotations[util.LogicalSwitchAnnotation])
@@ -750,7 +750,7 @@ func (c *Controller) getLocalPodIPsNeedPR(protocol string) (map[policyRouteMeta]
 			continue
 		}
 		//TODO (fix me) ignore non-ovn pod
-		if !neutron.HandledByKubeOvnOrigin(pod.Annotations) {
+		if !neutron.HandledByKubeOvnOrigin(c.config.DefaultNS, pod.Annotations) {
 			continue
 		}
 		subnet, err := c.subnetsLister.Get(pod.Annotations[util.LogicalSwitchAnnotation])

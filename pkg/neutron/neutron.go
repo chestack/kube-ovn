@@ -1,6 +1,8 @@
 package neutron
 
 import (
+	"fmt"
+
 	kubeovnv1 "github.com/kubeovn/kube-ovn/pkg/apis/kubeovn/v1"
 )
 
@@ -15,7 +17,7 @@ const (
 // 在 EOS 上的 Pod中，如果注解包含了:
 // v1.multus-cni.io/default-network: secure-container/kube-ovn
 // 就会调用 Neutron 的客户端去配置 Pod 的网络
-func HandledByNeutron(as map[string]string) bool {
+func HandledByNeutron(ns string, as map[string]string) bool {
 	if as == nil {
 		return false
 	}
@@ -23,13 +25,13 @@ func HandledByNeutron(as map[string]string) bool {
 	if !ok {
 		return false
 	}
-	return v == SEC_CON_KUBE_OVN
+	return v == fmt.Sprintf("%s/%s", ns, SEC_CON_KUBE_OVN)
 }
 
 // 在 EOS 上的 Pod中，如果注解包含了:
 // v1.multus-cni.io/default-network: secure-container/kube-ovn-origin
 // 就会调用社区原生 kube-ovn 去配置 Pod 的网络
-func HandledByKubeOvnOrigin(as map[string]string) bool {
+func HandledByKubeOvnOrigin(ns string, as map[string]string) bool {
 	if as == nil {
 		return false
 	}
@@ -37,7 +39,7 @@ func HandledByKubeOvnOrigin(as map[string]string) bool {
 	if !ok {
 		return false
 	}
-	return v == SEC_CON_KUBE_OVN_ORIGIN
+	return v == fmt.Sprintf("%s/%s", ns, SEC_CON_KUBE_OVN_ORIGIN)
 }
 
 func ValidateNeutronConfig(as map[string]string) error {

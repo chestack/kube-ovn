@@ -69,11 +69,11 @@ func (c *Controller) enqueueAddPod(obj interface{}) {
 	// 社区版的 kube-ovn 是以其作为集群默认的 CNI 来设计的，informer 默认将所有集群上创建的 Pod
 	// 但在我们 EOS 中，只有符合下面两个条件的 Pod（根据注解）,由 multus 判断是否由 kube-ovn 来配置 Pod
 	// 的网卡。
-	if !(neutron.HandledByNeutron(p.Annotations) || neutron.HandledByKubeOvnOrigin(p.Annotations)) {
+	if !(neutron.HandledByNeutron(c.config.DefaultNS, p.Annotations) || neutron.HandledByKubeOvnOrigin(c.config.DefaultNS, p.Annotations)) {
 		return
 	}
 
-	if neutron.HandledByNeutron(p.Annotations) {
+	if neutron.HandledByNeutron(c.config.DefaultNS, p.Annotations) {
 		if p.Annotations != nil && p.Annotations[util.AllocatedAnnotation] != "true" {
 			klog.V(3).Infof("enqueue add pod %s", key)
 			c.addPodQueue.Add(key)
@@ -155,7 +155,7 @@ func (c *Controller) enqueueDeletePod(obj interface{}) {
 	}
 
 	// if the deleted pod is on Neutron network, store the Port ID for later use
-	if neutron.HandledByNeutron(p.Annotations) {
+	if neutron.HandledByNeutron(c.config.DefaultNS, p.Annotations) {
 		c.neutronController.ntrnCli.RememberPortID(key, p.Annotations[neutron.PORT_NAME])
 	}
 
@@ -198,12 +198,12 @@ func (c *Controller) enqueueUpdatePod(oldObj, newObj interface{}) {
 
 	// 目前如果是走 Neutron 配置网卡，没有什么针对 update 的实现，例如修改了
 	// network， subnet等，所以在此跳过
-	if neutron.HandledByNeutron(newPod.GetAnnotations()) {
+	if neutron.HandledByNeutron(c.config.DefaultNS, newPod.GetAnnotations()) {
 		return
 	}
 
 	// 如果 pod 不由原生 kube-ovn 来配置网络，也应该被忽略
-	if !neutron.HandledByKubeOvnOrigin(newPod.GetAnnotations()) {
+	if !neutron.HandledByKubeOvnOrigin(c.config.DefaultNS, newPod.GetAnnotations()) {
 		return
 	}
 
@@ -372,7 +372,7 @@ func (c *Controller) processNextDeletePodWorkItem() bool {
 		// 社区版的 kube-ovn 是以其作为集群默认的 CNI 来设计的，informer 默认将所有集群上被删除的 Pod
 		// 但在我们 EOS 中，只有符合下面两个条件的 Pod（根据注解）,由 multus 判断是否由 kube-ovn 来清理 Pod
 		// 的网卡。
-		if !(neutron.HandledByNeutron(pod.Annotations) || neutron.HandledByKubeOvnOrigin(pod.Annotations)) {
+		if !(neutron.HandledByNeutron(c.config.DefaultNS, pod.Annotations) || neutron.HandledByKubeOvnOrigin(c.config.DefaultNS, pod.Annotations)) {
 			return nil
 		}
 
@@ -499,7 +499,7 @@ func (c *Controller) handleAddPod(key string) error {
 	pod := oripod.DeepCopy()
 
 	// when Pod is attatched to Neutron network
-	if neutron.HandledByNeutron(pod.Annotations) {
+	if neutron.HandledByNeutron(c.config.DefaultNS, pod.Annotations) {
 		if err := neutron.ValidateNeutronConfig(pod.Annotations); err != nil {
 			return err
 		}
@@ -911,7 +911,7 @@ func (c *Controller) handleUpdatePod(key string) error {
 	pod := oripod.DeepCopy()
 
 	// skip update operation if the pod in on Neutron network
-	if neutron.HandledByNeutron(pod.Annotations) {
+	if neutron.HandledByNeutron(c.config.DefaultNS, pod.Annotations) {
 		return nil
 	}
 

@@ -150,7 +150,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 		return
 	}
 
-	if !neutron.HandledByNeutron(pod.Annotations) {
+	if !neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) {
 		if err := csh.createOrUpdateIPCr(podRequest, subnet, ip, macAddr); err != nil {
 			if err := resp.WriteHeaderAndEntity(http.StatusInternalServerError, request.CniResponse{Err: err.Error()}); err != nil {
 				klog.Errorf("failed to write response, %v", err)
@@ -161,7 +161,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 
 	if strings.HasSuffix(podRequest.Provider, util.OvnProvider) && subnet != "" {
 		podSubnet, err := csh.Controller.subnetsLister.Get(subnet)
-		if err != nil && !neutron.HandledByNeutron(pod.Annotations) {
+		if err != nil && !neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) {
 			errMsg := fmt.Errorf("failed to get subnet %s: %v", subnet, err)
 			klog.Error(errMsg)
 			if err = resp.WriteHeaderAndEntity(http.StatusInternalServerError, request.CniResponse{Err: errMsg.Error()}); err != nil {
@@ -232,7 +232,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 			return
 		}
 
-		if neutron.HandledByNeutron(pod.Annotations) {
+		if neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) {
 			//更新 Neutron Port 的 hostID, devive owner 和 id(pod的uid作为 port 的 device id)
 			err = csh.Controller.neutronClient.BindPort(portID, pod.Spec.NodeName, string(pod.ObjectMeta.UID))
 			if err != nil {
@@ -248,7 +248,7 @@ func (csh cniServerHandler) handleAdd(req *restful.Request, resp *restful.Respon
 			}
 		}
 
-		if err = csh.Controller.addEgressConfig(podSubnet, ip); err != nil && !neutron.HandledByNeutron(pod.Annotations) {
+		if err = csh.Controller.addEgressConfig(podSubnet, ip); err != nil && !neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) {
 			errMsg := fmt.Errorf("failed to add egress configuration: %v", err)
 			klog.Error(errMsg)
 			if err = resp.WriteHeaderAndEntity(http.StatusInternalServerError, request.CniResponse{Err: errMsg.Error()}); err != nil {
@@ -353,7 +353,7 @@ func (csh cniServerHandler) handleDel(req *restful.Request, resp *restful.Respon
 	klog.Infof("delete port request %v", podRequest)
 	if pod.Annotations != nil && (podRequest.Provider == util.OvnProvider || podRequest.CniType == util.CniTypeName) {
 		subnet := pod.Annotations[fmt.Sprintf(util.LogicalSwitchAnnotationTemplate, podRequest.Provider)]
-		if !neutron.HandledByNeutron(pod.Annotations) && subnet != "" {
+		if !neutron.HandledByNeutron(csh.Config.DefaultNS, pod.Annotations) && subnet != "" {
 			ip := pod.Annotations[fmt.Sprintf(util.IpAddressAnnotationTemplate, podRequest.Provider)]
 			if err = csh.Controller.removeEgressConfig(subnet, ip); err != nil {
 				errMsg := fmt.Errorf("failed to remove egress configuration: %v", err)

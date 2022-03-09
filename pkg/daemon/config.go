@@ -49,6 +49,7 @@ type Configuration struct {
 	NoOVN              bool
 	ExternalGatewayNS  string
 	ExternalGatewayNet string
+	DefaultNS          string
 }
 
 // ParseFlags will parse cmd args then init kubeClient and configuration
@@ -71,9 +72,10 @@ func ParseFlags() (*Configuration, error) {
 		argsDefaultProviderName  = pflag.String("default-provider-name", "provider", "The vlan or vxlan type default provider interface name")
 		argsDefaultInterfaceName = pflag.String("default-interface-name", "", "The default host interface name in the vlan/vxlan type")
 
-		argExternalGatewayNS  = pflag.String("external-gateway-ns", "secure-container", "The namespace of configmap external-gateway-config, default: secure-container")
+		argExternalGatewayNS  = pflag.String("external-gateway-ns", "ecp-eks-managed", "The namespace of configmap external-gateway-config, default: ecp-eks-managed")
 		argExternalGatewayNet = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
-		argNodeWhiteLabels    = pflag.String("node-white-labels", "secure-container=enabled,kubevirt=enabled", " whichlist nodes which will allocated ip from default logic switch, default: secure-container=enabled,kubevirt=enabled")
+		argNodeWhiteLabels    = pflag.String("node-white-labels", "secure-container=enabled,openstack-network-node=enabled", " whichlist nodes which will allocated ip from default logic switch, default: secure-container=enabled,openstack-network-node=enabled")
+		argDefaultNS          = pflag.String("default-ns", "ecp-eks-managed", "The default namespace, default: ecp-eks-managed")
 	)
 
 	// mute info log for ipset lib
@@ -131,6 +133,7 @@ func ParseFlags() (*Configuration, error) {
 		DefaultInterfaceName:  *argsDefaultInterfaceName,
 		ExternalGatewayNS:     *argExternalGatewayNS,
 		ExternalGatewayNet:    *argExternalGatewayNet,
+		DefaultNS:             *argDefaultNS,
 	}
 
 	if err := config.initKubeClient(); err != nil {

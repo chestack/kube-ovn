@@ -29,7 +29,7 @@ func (c *Controller) inspectPod() error {
 	}
 	for _, oripod := range pods {
 		//TODO (fix me) ignore non-ovn pod
-		if !neutron.HandledByKubeOvnOrigin(oripod.GetAnnotations()) {
+		if !neutron.HandledByKubeOvnOrigin(c.config.DefaultNS, oripod.GetAnnotations()) {
 			continue
 		}
 		pod := oripod.DeepCopy()
