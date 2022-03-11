@@ -326,14 +326,15 @@ type Vpc struct {
 }
 
 type VpcSpec struct {
-	NeutronRouter       string  `json:"neutronRouter,omitempty"`
-	AvailabilityZone    string  `json:"availabilityZone,omitempty"`
-	ExternalNetwork     string  `json:"externalNetwork,omitempty"`
-	ExternalGatewayIP   string  `json:"externalGatewayIp,omitempty"`
-	GatewayNode         string  `json:"gatewayNode,omitempty"`
-	Namespaces   []string       `json:"namespaces,omitempty"`
-	StaticRoutes []*StaticRoute `json:"staticRoutes,omitempty"`
-	PolicyRoutes []*PolicyRoute `json:"policyRoutes,omitempty"`
+	NeutronRouter       string         `json:"neutronRouter,omitempty"`
+	AvailabilityZone    string         `json:"availabilityZone,omitempty"`
+	ExternalNetworkName string         `json:"externalNetworkName,omitempty"`
+	ExternalNetworkID   string         `json:"externalNetworkID,omitempty"`
+	ExternalGatewayIP   string         `json:"externalGatewayIp,omitempty"`
+	GatewayNode         string         `json:"gatewayNode,omitempty"`
+	Namespaces          []string       `json:"namespaces,omitempty"`
+	StaticRoutes        []*StaticRoute `json:"staticRoutes,omitempty"`
+	PolicyRoutes        []*PolicyRoute `json:"policyRoutes,omitempty"`
 }
 
 type RoutePolicy string

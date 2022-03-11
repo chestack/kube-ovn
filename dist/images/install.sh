@@ -281,7 +281,9 @@ spec:
                   type: string
                 availabilityZone:
                   type: string
-                externalNetwork:
+                externalNetworkName:
+                  type: string
+                externalNetworkID:
                   type: string
                 externalGatewayIp:
                   type: string

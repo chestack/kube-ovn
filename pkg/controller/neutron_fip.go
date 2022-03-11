@@ -55,15 +55,19 @@ func (c *Controller) syncFip() func() {
 		}
 
 		for _, vpc := range vpcList {
-			if _, ok := vpcExternalNetworkMap[vpc.Spec.ExternalNetwork]; ok {
-				vpcExternalNetworkMap[vpc.Spec.ExternalNetwork] = append(vpcExternalNetworkMap[vpc.Spec.ExternalNetwork], vpc)
+			if vpc.Spec.ExternalNetworkID == "" {
+				// klog.Warningf("external network not found, skip vpc: %s", vpc.Name)
 				continue
 			}
-			vpcExternalNetworkMap[vpc.Spec.ExternalNetwork] = []*kubeovnv1.Vpc{vpc}
+			if _, ok := vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID]; ok {
+				vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID] = append(vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID], vpc)
+				continue
+			}
+			vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID] = []*kubeovnv1.Vpc{vpc}
 		}
 
-		for externalNetworkName, vpcs := range vpcExternalNetworkMap {
-			externalNetwork, err := neutron.NewClient().GetNetworkFromName(externalNetworkName)
+		for externalNetworkID, vpcs := range vpcExternalNetworkMap {
+			externalNetwork, err := neutron.NewClient().GetNetwork(externalNetworkID)
 			if err != nil {
 				klog.Errorf("get external network failed, err: %+v\n", err)
 				return
@@ -144,7 +148,7 @@ func allocatedIPIsExist(allocatedIP neutronv1.AllocatedIP, allocatedIPs []neutro
 // 当用户用过 yaml 方式删除了pod eip&snat annotation，则会导致 fip cr 中的 floatingip 资源泄露，故需要定时检查fip cr并回收floatingip 资源。
 func (c *Controller) gcFip() func() {
 	return func() {
-		klog.Info("gc fip")
+		// klog.Info("gc fip")
 		fipList, err := c.neutronController.fipsLister.List(labels.Everything())
 		if err != nil {
 			klog.Error("list fip failed")
@@ -189,7 +193,7 @@ func (c *Controller) gcFip() func() {
 				}
 			}
 		}
-		klog.Info("finish gc fip")
+		// klog.Info("finish gc fip")
 	}
 }
 
@@ -337,15 +341,19 @@ func (c *Controller) initFip() error {
 
 	for _, vpc := range vpcList {
 		klog.Infof("init fip, vpc: %+v\n", vpc)
-		if _, ok := vpcExternalNetworkMap[vpc.Spec.ExternalNetwork]; ok {
-			vpcExternalNetworkMap[vpc.Spec.ExternalNetwork] = append(vpcExternalNetworkMap[vpc.Spec.ExternalNetwork], vpc)
+		if vpc.Spec.ExternalNetworkID == "" {
+			// klog.Warningf("external network not found, skip vpc: %s", vpc.Name)
 			continue
 		}
-		vpcExternalNetworkMap[vpc.Spec.ExternalNetwork] = []*kubeovnv1.Vpc{vpc}
+		if _, ok := vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID]; ok {
+			vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID] = append(vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID], vpc)
+			continue
+		}
+		vpcExternalNetworkMap[vpc.Spec.ExternalNetworkID] = []*kubeovnv1.Vpc{vpc}
 	}
 
-	for externalNetworkName, vpcs := range vpcExternalNetworkMap {
-		externalNetwork, err := neutron.NewClient().GetNetworkFromName(externalNetworkName)
+	for externalNetworkID, vpcs := range vpcExternalNetworkMap {
+		externalNetwork, err := neutron.NewClient().GetNetwork(externalNetworkID)
 		if err != nil {
 			klog.Errorf("get external network failed, err: %+v\n", err)
 			return err
@@ -520,9 +528,9 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 		return err
 	}
 
-	externalNetwork, err := neutron.NewClient().GetNetworkFromName(vpc.Spec.ExternalNetwork)
+	externalNetwork, err := neutron.NewClient().GetNetwork(vpc.Spec.ExternalNetworkID)
 	if err != nil {
-		klog.Errorf("get external network failed, name: %s, err: %+v\n", vpc.Spec.ExternalNetwork, err)
+		klog.Errorf("get external network failed, name: %s, err: %+v\n", vpc.Spec.ExternalNetworkName, err)
 		return err
 	}
 
