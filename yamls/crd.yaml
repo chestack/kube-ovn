@@ -170,6 +170,10 @@ spec:
                   type: array
                   items:
                     type: string
+                projectIDs:
+                  type: array
+                  items:
+                    type: string
                 gateway:
                   type: string
                 provider:

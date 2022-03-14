@@ -102,6 +102,7 @@ type SubnetSpec struct {
 	Vpc        string   `json:"vpc,omitempty"`
 	Protocol   string   `json:"protocol"`
 	Namespaces []string `json:"namespaces,omitempty"`
+	ProjectIDs []string `json:"projectIDs,omitempty"`
 	CIDRBlock  string   `json:"cidrBlock"`
 	Gateway    string   `json:"gateway"`
 	ExcludeIps []string `json:"excludeIps,omitempty"`
