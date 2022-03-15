@@ -123,6 +123,7 @@ type Fip struct {
 // AllocationPool represents a sub-range of cidr available for dynamic
 // allocation to ports, e.g. {Start: "10.0.0.2", End: "10.0.0.254"}
 type AllocationPool struct {
+	CIDR  string `json:"cidr"`
 	Start string `json:"start"`
 	End   string `json:"end"`
 }

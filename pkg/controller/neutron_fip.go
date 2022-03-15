@@ -453,6 +453,7 @@ func getAllocationPools(subnets []string) ([]neutronv1.AllocationPool, error) {
 
 		for _, allocationPool := range subnet.AllocationPools {
 			pool := neutronv1.AllocationPool{
+				CIDR:  subnet.CIDR,
 				Start: allocationPool.Start,
 				End:   allocationPool.End,
 			}

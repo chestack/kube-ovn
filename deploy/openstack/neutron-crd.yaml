@@ -176,6 +176,8 @@ spec:
                   items:
                     type: object
                     properties:
+                      cidr:
+                        type: string
                       start:
                         type: string
                       end:
