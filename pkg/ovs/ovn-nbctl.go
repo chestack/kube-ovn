@@ -729,6 +729,23 @@ type StaticRoute struct {
 	NextHop string
 }
 
+func (c Client) ListNeutronStaticRoute(filter string) ([]StaticRoute, error) {
+	output, err := c.ovnNbCommand("--format=csv", "--no-heading", "--data=bare", "--columns=ip_prefix,nexthop,policy", "find", "Logical_Router_Static_Route", fmt.Sprintf("external_ids=%s", filter))
+	if err != nil {
+		return nil, err
+	}
+	entries := strings.Split(output, "\n")
+	staticRoutes := make([]StaticRoute, 0, len(entries))
+	for _, entry := range strings.Split(output, "\n") {
+		if len(strings.Split(entry, ",")) == 3 {
+			t := strings.Split(entry, ",")
+			staticRoutes = append(staticRoutes,
+				StaticRoute{CIDR: strings.TrimSpace(t[0]), NextHop: strings.TrimSpace(t[1]), Policy: strings.TrimSpace(t[2])})
+		}
+	}
+	return staticRoutes, nil
+}
+
 func (c Client) ListStaticRoute() ([]StaticRoute, error) {
 	output, err := c.ovnNbCommand("--format=csv", "--no-heading", "--data=bare", "--columns=ip_prefix,nexthop,policy", "find", "Logical_Router_Static_Route", "external_ids{=}{}")
 	if err != nil {

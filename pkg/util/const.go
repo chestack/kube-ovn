@@ -162,4 +162,5 @@ const (
 	NeutronRouterTag             = "kubernetes-pod"
 	NeutronNetworkNodeLabelKey   = "openstack-network-node"
 	NeutronNetworkNodeLabelValue = "enabled"
+	NeutronRoutesFilter          = "owner_is_neutron=true"
 )

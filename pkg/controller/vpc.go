@@ -321,13 +321,25 @@ func (c *Controller) handleAddOrUpdateVpc(key string) error {
 				return err
 			}
 			staticRoutes = append(staticRoutes, neutronStaticRoutes...)
-			for i, route := range existRoute {
-				if route.CIDR == "0.0.0.0/0" {
-					// keep default route rule from neutron router
-					// remove it from existRoute
-					existRoute[i] = existRoute[len(existRoute)-1]
-					existRoute = existRoute[:len(existRoute)-1]
-					break
+
+			// list ic routes from neutron
+			icRoutes, err := c.ovnClient.ListNeutronStaticRoute(util.NeutronRoutesFilter)
+			if err != nil {
+				klog.Errorf("failed to list ic routes: %v", err)
+				return err
+			}
+
+			for _, route := range existRoute {
+				if route.CIDR == "0.0.0.0/0" || isNeutronICRoute(icRoutes, route) {
+					policy := kubeovnv1.PolicyDst
+					if route.Policy == ovs.PolicySrcIP {
+						policy = kubeovnv1.PolicySrc
+					}
+					staticRoutes = append(staticRoutes, &kubeovnv1.StaticRoute{
+						Policy:    policy,
+						CIDR:      route.CIDR,
+						NextHopIP: route.NextHop,
+					})
 				}
 			}
 		}
@@ -430,6 +442,15 @@ func (c *Controller) handleAddOrUpdateVpc(key string) error {
 	}
 
 	return nil
+}
+
+func isNeutronICRoute(icRoutes []ovs.StaticRoute, target *ovs.StaticRoute) bool {
+	for _, route := range icRoutes {
+		if target.CIDR == route.CIDR && target.NextHop == route.NextHop {
+			return true
+		}
+	}
+	return false
 }
 
 func diffPolicyRoute(exist []*ovs.PolicyRoute, target []*kubeovnv1.PolicyRoute) (routeNeedDel []*kubeovnv1.PolicyRoute, routeNeedAdd []*kubeovnv1.PolicyRoute, err error) {
