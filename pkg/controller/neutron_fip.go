@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -34,6 +35,21 @@ func (r NeutronRoutersByID) Swap(i, j int) {
 
 func (r NeutronRoutersByID) Less(i, j int) bool {
 	return r[i].NeutronRouterID < r[j].NeutronRouterID
+}
+
+// AllocationPoolsByID makes an array of allocation pools sortable by their id in ascending order.
+type AllocationPoolsByID []neutronv1.AllocationPool
+
+func (r AllocationPoolsByID) Len() int {
+	return len(r)
+}
+
+func (r AllocationPoolsByID) Swap(i, j int) {
+	r[i], r[j] = r[j], r[i]
+}
+
+func (r AllocationPoolsByID) Less(i, j int) bool {
+	return r[i].CIDR < r[j].CIDR
 }
 
 func (c *NeutronController) runSyncFipWorker() func() {
@@ -74,6 +90,12 @@ func (c *Controller) syncFip() func() {
 			}
 			// klog.Infof("get external network success, external network: %+v\n", externalNetwork)
 
+			allocationPools, err := getAllocationPools(externalNetwork.Subnets)
+			if err != nil {
+				klog.Errorf("get allocation pools from external network, err: %+v\n", err)
+				return
+			}
+
 			neutronRouters := genNeutronRouters(vpcs)
 			// klog.Infof("gen neutron routers: %+v\n", neutronRouters)
 
@@ -91,7 +113,6 @@ func (c *Controller) syncFip() func() {
 					}
 					klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
 					c.neutronController.syncFipQueue.Add(fipPatch)
-
 				}
 
 				forbiddenIPs, err := getForbiddenIPs(externalNetwork.ID)
@@ -114,15 +135,24 @@ func (c *Controller) syncFip() func() {
 					c.neutronController.syncFipQueue.Add(fipPatch)
 				}
 
+				// fip cr已存在，判断allocationPools是否发生变更，如果fip cr 的 allocationPools 信息未发生变更，则不需要更新
+				sort.Sort(AllocationPoolsByID(oldFip.Spec.AllocationPools))
+				sort.Sort(AllocationPoolsByID(allocationPools))
+				if !reflect.DeepEqual(oldFip.Spec.AllocationPools, allocationPools) {
+					data := map[string]interface{}{
+						"spec": map[string][]neutronv1.AllocationPool{
+							"allocationPools": allocationPools,
+						},
+					}
+					patchData, _ := json.Marshal(data)
+					_, err = c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Patch(context.Background(), externalNetwork.ID, types.MergePatchType, patchData, metav1.PatchOptions{})
+					if err != nil {
+						klog.Warningf("patch floating ip cr allocation pools failed, fip: %+v, err: %+v\n", externalNetwork.ID, err)
+					}
+				}
+
 				continue
 			}
-
-			allocationPools, err := getAllocationPools(externalNetwork.Subnets)
-			if err != nil {
-				klog.Errorf("get allocation pools from external network, err: %+v\n", err)
-				return
-			}
-			// klog.Infof("get allocation pools success, allocation pools: %+v\n", allocationPools)
 
 			newFip := genFipStruct(externalNetwork.ID, externalNetwork.Name, neutronRouters, allocationPools)
 			fip, err := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Create(context.TODO(), newFip, metav1.CreateOptions{})
