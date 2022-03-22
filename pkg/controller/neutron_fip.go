@@ -111,7 +111,7 @@ func (c *Controller) syncFip() func() {
 						Path:           "/status/neutronRouters",
 						NeutronRouters: neutronRouters,
 					}
-					klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+					klog.Infof("add FipPatch to syncFipQueue, op: %s, name: %s, path: %s, patch: %+v\n", fipPatch.Op, fipPatch.Name, fipPatch.Path, fipPatch.NeutronRouters)
 					c.neutronController.syncFipQueue.Add(fipPatch)
 				}
 
@@ -131,7 +131,7 @@ func (c *Controller) syncFip() func() {
 						Path:         "/status/forbiddenIPs",
 						ForbiddenIPs: forbiddenIPs,
 					}
-					klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+					klog.Infof("add FipPatch to syncFipQueue, op: %s, name: %s, path: %s, patch: %+v\n", fipPatch.Op, fipPatch.Name, fipPatch.Path, fipPatch.ForbiddenIPs)
 					c.neutronController.syncFipQueue.Add(fipPatch)
 				}
 
@@ -147,7 +147,7 @@ func (c *Controller) syncFip() func() {
 					patchData, _ := json.Marshal(data)
 					_, err = c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Patch(context.Background(), externalNetwork.ID, types.MergePatchType, patchData, metav1.PatchOptions{})
 					if err != nil {
-						klog.Warningf("patch floating ip cr allocation pools failed, fip: %+v, err: %+v\n", externalNetwork.ID, err)
+						klog.Warningf("patch floating ip cr allocation pools failed, fip: %s, err: %+v\n", externalNetwork.ID, err)
 					}
 				}
 
@@ -157,10 +157,10 @@ func (c *Controller) syncFip() func() {
 			newFip := genFipStruct(externalNetwork.ID, externalNetwork.Name, neutronRouters, allocationPools)
 			fip, err := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Create(context.TODO(), newFip, metav1.CreateOptions{})
 			if err != nil {
-				klog.Warningf("create floating ip cr failure to api server, fip: %+v, err: %+v\n", newFip, err)
+				klog.Warningf("create floating ip cr failure to api server, fip: %s, err: %+v\n", newFip.Name, err)
 				continue
 			}
-			klog.Infof("create floating ip cr success to api server, fip: %+v\n", fip)
+			klog.Infof("create floating ip cr success to api server, fip: %s\n", fip.Name)
 		}
 	}
 }
@@ -188,12 +188,12 @@ func (c *Controller) gcFip() func() {
 			for _, allocatedIP := range fip.Status.AllocatedIPs {
 				if allocatedIP.Type == util.EipAnnotation {
 					if len(allocatedIP.Resources) != 1 {
-						klog.Errorf("resources type error, allocatedIP: %+v\n", allocatedIP)
+						klog.Errorf("the number of allocated ip resources occupied is abnormal.")
 						return
 					}
 					resources := strings.Split(allocatedIP.Resources[0], "/")
 					if len(resources) != 2 {
-						klog.Errorf("resource type error, allocatedIP: %+v\n", allocatedIP)
+						klog.Errorf("allocated ip resource error")
 						return
 					}
 					_, err = c.podsLister.Pods(resources[0]).Get(resources[1])
@@ -216,7 +216,7 @@ func (c *Controller) gcFip() func() {
 								Path:        "/status/allocatedIPs",
 								AllocatedIP: allocatedIP,
 							}
-							klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+							klog.Infof("add FipPatch to syncFipQueue, op: %s, name: %s, path: %s, patch: %+v\n", fipPatch.Op, fipPatch.Name, fipPatch.Path, fipPatch.AllocatedIP)
 							c.neutronController.syncFipQueue.Add(fipPatch)
 						}
 					}
@@ -287,13 +287,11 @@ func replaceForbiddenIPs(fip *neutronv1.Fip, forbiddenIPs []string) {
 }
 
 func (c *NeutronController) handleSyncFip(obj interface{}) error {
-	klog.Info("handle sync fip")
 	fipPacth, ok := obj.(*neutronv1.FipPatch)
 	if !ok {
 		klog.Error("obj type error")
 		return errors.New("obj type error")
 	}
-	klog.Infof("handle sync fip, fipPacth: %+v\n", fipPacth)
 
 	c.fipKeyMutex.Lock(fipPacth.Name)
 	defer c.fipKeyMutex.Unlock(fipPacth.Name)
@@ -307,7 +305,6 @@ func (c *NeutronController) handleSyncFip(obj interface{}) error {
 		}
 		return err
 	}
-	klog.Infof("handle sync fip, oldFip: %+v\n", oldFip)
 
 	newFip := oldFip.DeepCopy()
 	newFip.Status = *oldFip.Status.DeepCopy()
@@ -336,7 +333,7 @@ func (c *NeutronController) handleSyncFip(obj interface{}) error {
 		}
 	}
 
-	klog.Infof("handle sync fip, newFip: %+v\n", newFip)
+	klog.Infof("gen new fip, name: %s, allocatedIPs: %+v, forbiddenIPs: %+v, neutronRouters: %+v\n", newFip.Name, newFip.Status.AllocatedIPs, newFip.Status.ForbiddenIPs, newFip.Status.NeutronRouters)
 
 	if reflect.DeepEqual(oldFip.Status, newFip.Status) {
 		klog.Info("fip status deep equal, no sync required")
@@ -354,7 +351,6 @@ func (c *NeutronController) handleSyncFip(obj interface{}) error {
 		klog.Errorf("patch floating ip failed, name: %s, err: %+v\n", newFip.Name, err)
 		return err
 	}
-	klog.Info("patch floating ip success")
 	return nil
 }
 
@@ -370,7 +366,7 @@ func (c *Controller) initFip() error {
 	}
 
 	for _, vpc := range vpcList {
-		klog.Infof("init fip, vpc: %+v\n", vpc)
+		klog.Infof("init fip, vpc: %s\n", vpc.Name)
 		if vpc.Spec.ExternalNetworkID == "" {
 			// klog.Warningf("external network not found, skip vpc: %s", vpc.Name)
 			continue
@@ -388,7 +384,7 @@ func (c *Controller) initFip() error {
 			klog.Errorf("get external network failed, err: %+v\n", err)
 			return err
 		}
-		klog.Infof("get external network success, external network: %+v\n", externalNetwork)
+		klog.Infof("get external network success, id: %s, name: %s\n", externalNetwork.ID, externalNetwork.Name)
 
 		neutronRouters := genNeutronRouters(vpcs)
 		klog.Infof("gen neutron routers success, neutronRouters: %+v\n", neutronRouters)
@@ -410,10 +406,10 @@ func (c *Controller) initFip() error {
 
 		fip, err := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Create(context.TODO(), newFip, metav1.CreateOptions{})
 		if err != nil {
-			klog.Warningf("create floating ip cr failure to api server, fip: %+v, err: %+v\n", newFip, err)
+			klog.Warningf("create floating ip cr failure to api server, err: %+v\n", err)
 			continue
 		}
-		klog.Infof("create fip cr success to api server, fip: %+v\n", fip)
+		klog.Infof("create fip cr success to api server, fip: %s\n", fip.Name)
 	}
 	return nil
 }
@@ -570,7 +566,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 		klog.Errorf("get fip failed, name: %s\n", externalNetwork.ID)
 		return err
 	}
-	klog.Infof("handle fip, oldFip: %+v\n", oldFip)
+	// klog.Infof("handle fip, oldFip: %+v\n", oldFip)
 
 	resource := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 
@@ -593,7 +589,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容
 			fipPatch := genEipPatch(op, eip, resource, oldFip)
-			klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+			klog.Infof("add FipPatch to syncFipQueue, op: %s, name: %s, path: %s, patch: %+v\n", fipPatch.Op, fipPatch.Name, fipPatch.Path, fipPatch.AllocatedIP)
 			c.neutronController.syncFipQueue.Add(fipPatch)
 		}
 
@@ -614,7 +610,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容
 			fipPatch := genSnatPatch(op, snat, resource, oldFip)
-			klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+			klog.Infof("add FipPatch to syncFipQueue, op: %s, name: %s, path: %s, patch: %+v\n", fipPatch.Op, fipPatch.Name, fipPatch.Path, fipPatch.AllocatedIP)
 			c.neutronController.syncFipQueue.Add(fipPatch)
 		}
 	case "del":
@@ -629,7 +625,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容
 			fipPatch := genEipPatch(op, eip, resource, oldFip)
-			klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+			klog.Infof("add FipPatch to syncFipQueue, op: %s, name: %s, path: %s, patch: %+v\n", fipPatch.Op, fipPatch.Name, fipPatch.Path, fipPatch.AllocatedIP)
 			c.neutronController.syncFipQueue.Add(fipPatch)
 		}
 
@@ -648,7 +644,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 
 			// 这里需要修改 fip cr status，生成对应的 fip cr patch 内容
 			fipPatch := genSnatPatch(op, snat, resource, oldFip)
-			klog.Infof("add FipPatch to syncFipQueue, FipPatch: %+v\n", fipPatch)
+			klog.Infof("add FipPatch to syncFipQueue, op: %s, name: %s, path: %s, patch: %+v\n", fipPatch.Op, fipPatch.Name, fipPatch.Path, fipPatch.AllocatedIP)
 			c.neutronController.syncFipQueue.Add(fipPatch)
 		}
 	default:
