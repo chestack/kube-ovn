@@ -735,7 +735,8 @@ func (c *Controller) deleteVpcRouter(lr string) error {
 
 func (c *Controller) addNodeSwitchToVPC(vpc *kubeovnv1.Vpc) error {
 	// allocate address
-	portName := fmt.Sprintf("%s-%s", vpc.Name, c.config.NodeSwitch)
+	// (fixme) add '.' into name to avoid node gc
+	portName := fmt.Sprintf("%s.%s", vpc.Name, c.config.NodeSwitch)
 	v4IP, _, mac, err := c.ipam.GetRandomAddress(portName, portName, "", c.config.NodeSwitch, nil, true)
 	if err != nil {
 		klog.Errorf("failed to alloc ip address for vpc %s node switch : %v", vpc.Name, err)
