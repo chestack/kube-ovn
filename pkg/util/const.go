@@ -159,7 +159,7 @@ const (
 	NetemQosLossAnnotationTemplate    = "%s.kubernetes.io/loss"
 
 	NeutronFipTag                = "kubernetes-pod"
-	NeutronRouterTag             = "kubernetes-pod"
+	NeutronRouterTag             = "kubernetes-vpc"
 	NeutronNetworkNodeLabelKey   = "openstack-network-node"
 	NeutronNetworkNodeLabelValue = "enabled"
 	NeutronRoutesFilter          = "owner_is_neutron=true"
