@@ -131,7 +131,8 @@ func ParseFlags() (*Configuration, error) {
 		argExternalGatewayNS         = pflag.String("external-gateway-ns", "ecp-eks-managed", "The namespace of configmap external-gateway-config, default: ecp-eks-managed")
 		argExternalGatewayNet        = pflag.String("external-gateway-net", "external", "The namespace of configmap external-gateway-config, default: external")
 		argExternalGatewayVlanID     = pflag.Int("external-gateway-vlanid", 0, "The vlanId of port ln-ovn-external, default: 0")
-		argNodeWhiteLabels           = pflag.String("node-white-labels", "secure-container=enabled,openstack-network-node=enabled", " whichlist nodes which will allocated ip from default logic switch, default: secure-container=enabled,openstack-network-node=enabled")
+		argNodeWhiteLabels           = pflag.String("node-white-labels", "secure-container=enabled,openstack-network-node=enabled", " whitelist nodes which will allocated ip from default logic switch, default: secure-container=enabled,openstack-network-node=enabled")
+		argNodeBlackLabels           = pflag.String("node-black-labels", "cloud-product=enabled,openstack-compute-node=enabled,openstack-control-plane=enabled,ceph-osd=enabled", " blacklist nodes which will not allocated ip from default logic switch")
 		argNeutronRouter             = pflag.Bool("neutron-router", true, "init cluster by calling neutron API, default: true")
 		argDefaultNeutronExternalNet = pflag.String("default-neutron-external-net", "", "Do not set external gateway if it's empty")
 		argNSWhiteLabels             = pflag.String("ns-white-labels", "managed.es.io/resource=namespace", "only deal with svc and ep of ns with this label, default: managed.es.io/resource=namespace")
@@ -160,6 +161,7 @@ func ParseFlags() (*Configuration, error) {
 
 	var (
 		labelslist = strings.Split(*argNodeWhiteLabels, ",")
+		blacklabelslist = strings.Split(*argNodeBlackLabels, ",")
 	)
 
 	for _, ls := range labelslist {
@@ -169,6 +171,15 @@ func ParseFlags() (*Configuration, error) {
 		}
 		util.NodeWhiteLabels[kv[0]] = kv[1]
 	}
+
+	for _, ls := range blacklabelslist {
+		kv := strings.Split(ls, "=")
+		if len(kv) != 2 {
+			panic("node-black-labels option is not correct, should be 'k1=v1,k2=v2' ")
+		}
+		util.NodeBlackLabels[kv[0]] = kv[1]
+	}
+
 	config := &Configuration{
 		OvnNbAddr:                     *argOvnNbAddr,
 		OvnSbAddr:                     *argOvnSbAddr,

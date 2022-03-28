@@ -203,10 +203,15 @@ func (c *Controller) handleAddNode(key string) error {
 	}
 	node := orinode.DeepCopy()
 
-	//TODO skip some node which not in whiteList.
 	if !util.InWhiteList(node) {
-		klog.Infof("node %s is not in whiteList, not handle", node.Name)
-		return nil
+		// skip nodes in blacklist to avoid infinite enqueuing
+		if util.InBlackList(node) {
+			klog.Infof("node %s is in blacklist, not handle", node.Name)
+			return nil
+		}
+		// requeue node in case that nodes being labeled later
+		// ref: #EAS-101423
+		return fmt.Errorf("node %s is not in whiteList, requeuing", node.Name)
 	}
 
 	subnets, err := c.subnetsLister.List(labels.Everything())
