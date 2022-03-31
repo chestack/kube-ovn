@@ -684,7 +684,8 @@ func (c *Controller) reconcileRouters(event subnetEvent) error {
 			}
 
 			if vpc.Status.NodeSwitchPortIP == "" {
-				return fmt.Errorf("node gateway ip is empty, re-enqueue")
+				klog.Errorf("nodeSwitchPortIP of vpc %s is empty, skip it", vpc.Name)
+				continue
 			}
 			gateway = vpc.Status.NodeSwitchPortIP
 		}
