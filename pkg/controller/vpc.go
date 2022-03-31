@@ -290,7 +290,10 @@ func (c *Controller) handleAddOrUpdateVpc(key string) error {
 
 			if !vpc.Status.Default && vpc.Status.NodeSwitchPortIP == "" {
 				klog.Infof("Add join network to %s ", vpc.Name)
-				c.addNodeSwitchToVPC(vpc)
+				if err = c.addNodeSwitchToVPC(vpc); err !=nil {
+					klog.Errorf("failed to add node switch to vpc %s: %v", vpc.Name, err)
+					return err
+				}
 			}
 		}
 
