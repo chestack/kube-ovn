@@ -83,14 +83,14 @@ func (c *Controller) syncFip() func() {
 		}
 
 		for externalNetworkID, vpcs := range vpcExternalNetworkMap {
-			externalNetwork, err := neutron.NewClient().GetNetwork(externalNetworkID)
+			externalNetwork, err := c.neutronController.ntrnCli.GetNetwork(externalNetworkID)
 			if err != nil {
 				klog.Errorf("get external network failed, err: %+v\n", err)
 				return
 			}
 			// klog.Infof("get external network success, external network: %+v\n", externalNetwork)
 
-			allocationPools, err := getAllocationPools(externalNetwork.Subnets)
+			allocationPools, err := getAllocationPools(c.neutronController.ntrnCli, externalNetwork.Subnets)
 			if err != nil {
 				klog.Errorf("get allocation pools from external network, err: %+v\n", err)
 				return
@@ -115,7 +115,7 @@ func (c *Controller) syncFip() func() {
 					c.neutronController.syncFipQueue.Add(fipPatch)
 				}
 
-				forbiddenIPs, err := getForbiddenIPs(externalNetwork.ID)
+				forbiddenIPs, err := getForbiddenIPs(c.neutronController.ntrnCli, externalNetwork.ID)
 				if err != nil {
 					klog.Errorf("get forbidden ips failed, externalNetworkID: %s, err: %+v\n", externalNetwork.ID, err)
 					return
@@ -203,7 +203,7 @@ func (c *Controller) gcFip() func() {
 						newfip, _ := c.neutronController.kubeNtrnCli.KubeovnV1().Fips().Get(context.TODO(), fip.Name, metav1.GetOptions{})
 						if allocatedIPIsExist(allocatedIP, newfip.Status.AllocatedIPs) && k8serrors.IsNotFound(err) {
 							// 删除 proton port floatingip 资源
-							err := neutron.NewClient().DeletePortWithFip(newfip.Spec.ExternalNetworkID, allocatedIP.IP)
+							err := c.neutronController.ntrnCli.DeletePortWithFip(newfip.Spec.ExternalNetworkID, allocatedIP.IP)
 							if err != nil {
 								klog.Errorf("delete port with floatingip from proton api failed, floatingip: %s, err: %+v\n", allocatedIP.IP, err)
 								continue
@@ -379,7 +379,7 @@ func (c *Controller) initFip() error {
 	}
 
 	for externalNetworkID, vpcs := range vpcExternalNetworkMap {
-		externalNetwork, err := neutron.NewClient().GetNetwork(externalNetworkID)
+		externalNetwork, err := c.neutronController.ntrnCli.GetNetwork(externalNetworkID)
 		if err != nil {
 			klog.Errorf("get external network failed, err: %+v\n", err)
 			return err
@@ -389,7 +389,7 @@ func (c *Controller) initFip() error {
 		neutronRouters := genNeutronRouters(vpcs)
 		klog.Infof("gen neutron routers success, neutronRouters: %+v\n", neutronRouters)
 
-		allocationPools, err := getAllocationPools(externalNetwork.Subnets)
+		allocationPools, err := getAllocationPools(c.neutronController.ntrnCli, externalNetwork.Subnets)
 		if err != nil {
 			klog.Errorf("get allocation pools from external network, err: %+v\n", err)
 			return err
@@ -439,12 +439,12 @@ func genNeutronRouters(vpcs []*kubeovnv1.Vpc) []neutronv1.NeutronRouter {
 }
 
 // get forbidden ips
-func getForbiddenIPs(networkID string) ([]string, error) {
+func getForbiddenIPs(client *neutron.Client, networkID string) ([]string, error) {
 	var (
 		forbiddenIPs []string
 	)
 
-	ports, err := neutron.NewClient().ListPortWithNetworkID(networkID)
+	ports, err := client.ListPortWithNetworkID(networkID)
 	if err != nil {
 		klog.Errorf("list port with neutron id failed, networkID: %s, err: %+v\n", networkID, err)
 		return nil, err
@@ -458,7 +458,7 @@ func getForbiddenIPs(networkID string) ([]string, error) {
 }
 
 // getAllocationPools 该函数将外部网络下所有子网的 AllocationPool 合并返回
-func getAllocationPools(subnets []string) ([]neutronv1.AllocationPool, error) {
+func getAllocationPools(client *neutron.Client, subnets []string) ([]neutronv1.AllocationPool, error) {
 	var (
 		result []neutronv1.AllocationPool
 	)
@@ -471,7 +471,7 @@ func getAllocationPools(subnets []string) ([]neutronv1.AllocationPool, error) {
 	// get external gateway network from proton api
 	for _, sn := range subnets {
 		// get subnet from proton api
-		subnet, err := neutron.NewClient().GetSubnet(sn)
+		subnet, err := client.GetSubnet(sn)
 		if err != nil {
 			klog.Errorf("get subnet from proton api failed, err: %+v\n", err)
 			return nil, err
@@ -555,7 +555,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 		return err
 	}
 
-	externalNetwork, err := neutron.NewClient().GetNetwork(vpc.Spec.ExternalNetworkID)
+	externalNetwork, err := c.neutronController.ntrnCli.GetNetwork(vpc.Spec.ExternalNetworkID)
 	if err != nil {
 		klog.Errorf("get external network failed, name: %s, err: %+v\n", vpc.Spec.ExternalNetworkName, err)
 		return err
@@ -580,7 +580,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 		// 判断eip是否可用
 		if isAvailable(eip, oldFip) {
 			// 创建 porton port 资源并绑定 floatingip 资源
-			port, err := neutron.NewClient().CreatePortWithFip(externalNetwork.ID, eip)
+			port, err := c.neutronController.ntrnCli.CreatePortWithFip(externalNetwork.ID, eip)
 			if err != nil {
 				klog.Errorf("create port with floatingip from proton api failed, floatingip: %s, err: %+v\n", snat, err)
 				return err
@@ -600,7 +600,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 			// 如果snat已经被其他pod使用，则共享proton floatingip资源，不需要创建
 			if isAvailable(snat, oldFip) {
 				// 创建 porton port 资源并绑定 floatingip 资源
-				port, err := neutron.NewClient().CreatePortWithFip(externalNetwork.ID, snat)
+				port, err := c.neutronController.ntrnCli.CreatePortWithFip(externalNetwork.ID, snat)
 				if err != nil {
 					klog.Errorf("create port with floatingip from proton api failed, floatingip: %s, err: %+v\n", snat, err)
 					return err
@@ -616,7 +616,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 	case "del":
 		// 判断eip是否正在被当前pod使用
 		if isPodEipAllocated(eip, resource, oldFip) {
-			err := neutron.NewClient().DeletePortWithFip(externalNetwork.ID, eip)
+			err := c.neutronController.ntrnCli.DeletePortWithFip(externalNetwork.ID, eip)
 			if err != nil {
 				klog.Errorf("delete port with floatingip from proton api failed, floatingip: %s, err: %+v\n", eip, err)
 				return err
@@ -634,7 +634,7 @@ func (c *Controller) handleFip(op string, pod *corev1.Pod) error {
 			// 判断snat是否正在被当前pod唯一使用
 			// 若snat被当前pod唯一使用，则pod删除后需要同步删除对应proton floatingip资源
 			if isSnatUniqueAllocated(snat, resource, oldFip) {
-				err := neutron.NewClient().DeletePortWithFip(externalNetwork.ID, snat)
+				err := c.neutronController.ntrnCli.DeletePortWithFip(externalNetwork.ID, snat)
 				if err != nil {
 					klog.Errorf("delete port with floatingip from proton api failed, floatingip: %s, err: %+v\n", snat, err)
 					return err
