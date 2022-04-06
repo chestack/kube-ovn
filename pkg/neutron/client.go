@@ -79,7 +79,7 @@ func newProviderClientOrDie(domainScope bool) *gophercloud.ProviderClient {
 	}
 	p, err := openstack.AuthenticatedClient(opt)
 	if err != nil {
-		klog.Warningf("openstack authenticate client error: %v", err)
+		klog.Fatalf("openstack authenticate client error: %v", err)
 	}
 	p.HTTPClient = http.Client{
 		Transport: http.DefaultTransport,
