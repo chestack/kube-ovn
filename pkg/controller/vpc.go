@@ -711,11 +711,15 @@ func (c *Controller) getVpcSubnets(vpc *kubeovnv1.Vpc) (subnets []string, defaul
 // createVpcRouter create router to connect logical switches in vpc
 func (c *Controller) createVpcRouter(vpc *kubeovnv1.Vpc, lr string) error {
 	if neutron.IsNeutronRouter(vpc, c.config.NeutronRouter) {
-		klog.Infof("%s is neutron managed vpc, update router %s to ensure it has tag", vpc.Name, vpc.Spec.NeutronRouter)
-		err := c.neutronController.ntrnCli.AddRouterTags(vpc.Spec.NeutronRouter, util.NeutronRouterTag)
-		if err != nil {
-			klog.Errorf("failed to add tag to vpc %s router: %v", vpc.Name, err)
-			return err
+		// for default vpc, the router has been created with tag
+		// for customized vpcs, vpc.Spec.NeutronRouter is necessary to add tag
+		if vpc.Spec.NeutronRouter != "" {
+			klog.Infof("%s is neutron managed vpc, update router %s to ensure it has tag", vpc.Name, vpc.Spec.NeutronRouter)
+			err := c.neutronController.ntrnCli.AddRouterTags(vpc.Spec.NeutronRouter, util.NeutronRouterTag)
+			if err != nil {
+				klog.Errorf("failed to add tag to vpc %s router: %v", vpc.Name, err)
+				return err
+			}
 		}
 	} else {
 		lrs, err := c.ovnClient.ListLogicalRouter(c.config.EnableExternalVpc)
