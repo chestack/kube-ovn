@@ -977,7 +977,8 @@ func (c Client) UpdateNatRule(policy, logicalIP, externalIP, router, logicalMac,
 			if c.ExternalGatewayType == "distributed" {
 				_, err = c.ovnNbCommand(MayExist, "--stateless", "lr-nat-add", router, policy, externalIP, logicalIP, port, logicalMac)
 			} else {
-				_, err = c.ovnNbCommand(MayExist, "lr-nat-add", router, policy, externalIP, logicalIP)
+				// (es-workaround) always use '--stateless' because 'ovn-external-gw-config' is not used in ES env
+				_, err = c.ovnNbCommand(MayExist, "--stateless", "lr-nat-add", router, policy, externalIP, logicalIP)
 			}
 			return err
 		}
