@@ -273,6 +273,11 @@ var _ = Describe("[Service]", func() {
 						}
 					}
 
+			port := localEtpHostService.Spec.Ports[0].NodePort
+			for _, node := range nodes.Items {
+				hasEndpoint := hasEndpoint(node.Name, localEtpHostEndpoints)
+				for _, pod := range containerPods.Items {
+					shoudSucceed := hasEndpoint || !proxyIpvsMode
 					for _, nodeIP := range nodeIPs(node) {
 						output, err := exec.Command("kubectl", strings.Fields(kubectlArgs(pod.Name, nodeIP, port))...).CombinedOutput()
 						outputStr := string(bytes.TrimSpace(output))
