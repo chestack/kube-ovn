@@ -21,7 +21,6 @@ if [ -n "$1" ]; then
     fi
 fi
 
-iptables -t nat -D POSTROUTING -m set ! --match-set ovn40subnets src -m set ! --match-set ovn40other-node src -m set --match-set ovn40subnets-nat dst -j RETURN
 iptables -t nat -D POSTROUTING -m set --match-set ovn40subnets-nat src -m set ! --match-set ovn40subnets dst -j MASQUERADE
 iptables -t filter -D INPUT -m set --match-set ovn40subnets dst -j ACCEPT
 iptables -t filter -D INPUT -m set --match-set ovn40subnets src -j ACCEPT
@@ -45,7 +44,6 @@ ipset destroy ovn40local-pod-ip-nat
 ipset destroy ovn40other-node
 ipset destroy ovn40services
 
-ip6tables -t nat -D POSTROUTING -m set ! --match-set ovn60subnets src -m set ! --match-set ovn60other-node src -m set --match-set ovn60subnets-nat dst -j RETURN
 ip6tables -t nat -D POSTROUTING -m set --match-set ovn60subnets-nat src -m set ! --match-set ovn60subnets dst -j MASQUERADE
 ip6tables -t filter -D INPUT -m set --match-set ovn60subnets dst -j ACCEPT
 ip6tables -t filter -D INPUT -m set --match-set ovn60subnets src -j ACCEPT

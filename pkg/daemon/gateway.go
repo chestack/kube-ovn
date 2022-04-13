@@ -380,8 +380,6 @@ func (c *Controller) setIptables() error {
 		}
 
 		v4Rules = []util.IPTableRule{
-			// do not nat route traffic
-			{Table: "nat", Chain: "POSTROUTING", Rule: strings.Fields(`-m set ! --match-set ovn40subnets src -m set ! --match-set ovn40other-node src -m set --match-set ovn40subnets-nat dst -j RETURN`)},
 			// nat outgoing
 			{Table: "nat", Chain: "POSTROUTING", Rule: strings.Fields(`-m set --match-set ovn40subnets-nat src -m set ! --match-set ovn40subnets dst -j MASQUERADE`)},
 			// Input Accept
@@ -398,8 +396,6 @@ func (c *Controller) setIptables() error {
 			{Table: "filter", Chain: "OUTPUT", Rule: strings.Fields(`-p udp -m udp --dport 6081 -j MARK --set-xmark 0x0`)},
 		}
 		v6Rules = []util.IPTableRule{
-			// do not nat route traffic
-			{Table: "nat", Chain: "POSTROUTING", Rule: strings.Fields(`-m set ! --match-set ovn60subnets src -m set ! --match-set ovn60other-node src -m set --match-set ovn60subnets-nat dst -j RETURN`)},
 			// nat outgoing
 			{Table: "nat", Chain: "POSTROUTING", Rule: strings.Fields(`-m set --match-set ovn60subnets-nat src -m set ! --match-set ovn60subnets dst -j MASQUERADE`)},
 			// Input Accept
@@ -450,10 +446,10 @@ func (c *Controller) setIptables() error {
 			)
 
 			rules := make([]util.IPTableRule, len(iptablesRules)+2)
-			copy(rules[1:3], iptablesRules[:2])
+			copy(rules[1:2], iptablesRules[:1])
 			rules[0] = util.IPTableRule{Table: "nat", Chain: "POSTROUTING", Rule: strings.Fields(fmt.Sprintf(`! -s %s -m mark --mark 0x4000/0x4000 -j MASQUERADE`, nodeIP))}
-			rules[3] = util.IPTableRule{Table: "nat", Chain: "POSTROUTING", Rule: strings.Fields(fmt.Sprintf(`! -s %s -m set ! --match-set %s src -m set --match-set %s dst -j MASQUERADE`, nodeIP, matchset, matchset))}
-			copy(rules[4:], iptablesRules[2:])
+			rules[2] = util.IPTableRule{Table: "nat", Chain: "POSTROUTING", Rule: strings.Fields(fmt.Sprintf(`! -s %s -m set ! --match-set %s src -m set --match-set %s dst -j MASQUERADE`, nodeIP, matchset, matchset))}
+			copy(rules[3:], iptablesRules[1:])
 			iptablesRules = rules
 		}
 
@@ -705,7 +701,6 @@ func (c *Controller) getSubnetsNeedNAT(protocol string) ([]string, error) {
 		if subnet.DeletionTimestamp == nil &&
 			subnet.Spec.NatOutgoing &&
 			(subnet.Spec.Vlan == "" || subnet.Spec.LogicalGateway) &&
-			subnet.Spec.Vpc == util.DefaultVpc &&
 			(subnet.Spec.Protocol == kubeovnv1.ProtocolDual || subnet.Spec.Protocol == protocol) {
 			cidrBlock := getCidrByProtocol(subnet.Spec.CIDRBlock, protocol)
 			subnetsNeedNat = append(subnetsNeedNat, cidrBlock)
