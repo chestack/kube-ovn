@@ -119,6 +119,11 @@ func (c Client) AddRouterTags(id string, tag string) error {
 	return r.ExtractErr()
 }
 
+func (c Client) DeleteRouterTags(id string, tag string) error {
+	r := tags.Delete(c.networkCliV2, "routers", id, tag)
+	return r.ExtractErr()
+}
+
 func (c Client) DeleteRouter(id string) error {
 	r := routers.Delete(c.networkCliV2, id)
 	return r.ExtractErr()

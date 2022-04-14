@@ -121,7 +121,21 @@ func (c *Controller) handleDelVpc(vpc *kubeovnv1.Vpc) error {
 		}
 	} else if !vpc.Status.Default {
 		// detach from node switch
-		return c.detachFromNodeSwitch(vpc)
+		err := c.detachFromNodeSwitch(vpc)
+		if err != nil {
+			klog.Errorf("failed to detach vpc %s router from node switch: %v", vpc.Name, err)
+			return err
+		}
+
+		// for customized vpcs, vpc.Spec.NeutronRouter is necessary to delete tag
+		if vpc.Spec.NeutronRouter != "" {
+			klog.Infof("%s is neutron managed vpc, delete tag from %s", vpc.Name, vpc.Spec.NeutronRouter)
+			err = c.neutronController.ntrnCli.DeleteRouterTags(vpc.Spec.NeutronRouter, util.NeutronRouterTag)
+			if err != nil {
+				klog.Errorf("failed to delete tag to vpc %s router: %v", vpc.Name, err)
+				return err
+			}
+		}
 	}
 	return nil
 }
