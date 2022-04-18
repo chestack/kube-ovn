@@ -1,11 +1,22 @@
 package util
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 
@@ -18,6 +29,37 @@ const (
 	V4Loopback  = "127.0.0.1/8"
 	V6Loopback  = "::1/128"
 )
+
+const (
+	Group     = "cluster.ecas.io"
+	Version   = "v1"
+	Namespace = "openstack"
+	Plural    = "ecsnodes"
+	Timeout   = 60 * time.Second
+)
+
+const (
+	RoleOpenstackNetwork = "openstack-network"
+	RoleSecureContainer  = "secure-container"
+)
+
+// Endpoint
+type Endpoint struct {
+	Dev  string `json:"dev,omitempty" protobuf:"bytes,1,opt,name=dev"`
+	IP   string `json:"ip,omitempty" protobuf:"bytes,2,opt,name=ip"`
+	Name string `json:"name,omitempty" protobuf:"bytes,3,opt,name=name"`
+}
+
+// Data
+type Data struct {
+	Endpoints []Endpoint `json:"endpoints,omitempty" protobuf:"bytes,1,opt,name=endpoints"`
+	RoleList  []string   `json:"role_list,omitempty" protobuf:"bytes,2,opt,name=role_list"`
+}
+
+// ECSNode
+type ECSNode struct {
+	Data Data `json:"data,omitempty" protobuf:"bytes,1,opt,name=data"`
+}
 
 func cidrConflict(cidr string) error {
 	for _, cidrBlock := range strings.Split(cidr, ",") {
@@ -212,5 +254,109 @@ func ValidateCidrConflict(subnet kubeovnv1.Subnet, subnetList []kubeovnv1.Subnet
 			return err
 		}
 	}
+	err := ValidateNodeCidrConflict(subnet)
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+func ValidateNodeCidrConflict(subnet kubeovnv1.Subnet) error {
+	nodeCidr, err := getNodeCidr()
+	if err != nil {
+		// TODO: Ignore errors when getting node cidr fails
+		klog.Errorf("Ignore errors when getting node information fails, err: %+v\n", err)
+		return nil
+	}
+	klog.Infof("Validate node cidr conflict, node cidr: %s", nodeCidr)
+
+	if CIDRConflict(nodeCidr, subnet.Spec.CIDRBlock) {
+		return fmt.Errorf("cidr %s of subnet %s is forbiddened", subnet.Spec.CIDRBlock, subnet.Name)
+	}
+	return nil
+}
+
+func listEcsNode() ([]byte, error) {
+	config, err := clientcmd.BuildConfigFromFlags("", "")
+	if err != nil {
+		return nil, err
+	}
+
+	ClientSet, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	options := metav1.ListOptions{}
+	result, err := ClientSet.AppsV1().RESTClient().Get().
+		AbsPath("apis", Group, Version).
+		Namespace(Namespace).
+		Resource(Plural).
+		VersionedParams(&options, scheme.ParameterCodec).
+		Timeout(Timeout).
+		DoRaw(context.TODO())
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func getNodeCidr() (string, error) {
+	result, err := listEcsNode()
+	if err != nil {
+		return "", err
+	}
+
+	objects := new(metav1.List)
+	err = json.Unmarshal(result, objects)
+	if err != nil {
+		return "", err
+	}
+
+	tIPCidrMap := make(map[interface{}]struct{})
+	for _, item := range objects.Items {
+		ecsNode := new(ECSNode)
+		err = json.Unmarshal(item.Raw, ecsNode)
+		if err != nil {
+			return "", err
+		}
+
+		if !needValidateNodeCidrConflict(ecsNode.Data.RoleList) {
+			continue
+		}
+
+		for _, endpoint := range ecsNode.Data.Endpoints {
+			if endpoint.IP == "" {
+				continue
+			}
+			_, tIpNet, err := net.ParseCIDR(endpoint.IP)
+			if err != nil {
+				continue
+			}
+			if _, ok := tIPCidrMap[tIpNet]; !ok {
+				tIPCidrMap[tIpNet] = struct{}{}
+			}
+		}
+	}
+
+	var forbiddenIPCidr bytes.Buffer
+	for tIPCidr := range tIPCidrMap {
+		if forbiddenIPCidr.Len() == 0 {
+			forbiddenIPCidr.WriteString(fmt.Sprintf("%s", tIPCidr))
+		} else {
+			forbiddenIPCidr.WriteString(fmt.Sprintf(",%s", tIPCidr))
+		}
+	}
+
+	return forbiddenIPCidr.String(), nil
+}
+
+func needValidateNodeCidrConflict(roleList []string) bool {
+	for _, role := range roleList {
+		if role == RoleOpenstackNetwork || role == RoleSecureContainer {
+			return true
+		}
+	}
+	return false
 }
