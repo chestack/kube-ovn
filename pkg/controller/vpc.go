@@ -290,6 +290,12 @@ func (c *Controller) handleAddOrUpdateVpc(key string) error {
 	}
 	vpc := orivpc.DeepCopy()
 
+	// keep vpc.Status.Standby = false instead of handling neutron vpc
+	// if neutronRouter is not configured, for EAS-103598 case
+	if c.config.NeutronRouter && vpc.Name != util.DefaultVpc && vpc.Spec.NeutronRouter == "" {
+		return fmt.Errorf("neutronRouter is needed for neturn vpc")
+	}
+
 	if err = formatVpc(vpc, c); err != nil {
 		klog.Errorf("failed to format vpc: %v", err)
 		return err
