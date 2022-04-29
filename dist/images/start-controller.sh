@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/local/bin/dumb-init /bin/bash
 set -euo pipefail
 ENABLE_SSL=${ENABLE_SSL:-false}
 OVN_DB_IPS=${OVN_DB_IPS:-}
